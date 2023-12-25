@@ -128,7 +128,7 @@ while running:
             if event.key == pygame.K_SPACE:
                 current_y = hard_drop(current_x, current_y, current_shape, grid)
                 hard_dropped = True
-            elif event.key == pygame.K_UP:
+            elif event.key == pygame.K_UP and not hard_dropped:
                 rotated_shape = rotate(current_shape)
                 if not collide(current_x, current_y, rotated_shape, grid):
                     current_shape = rotated_shape
