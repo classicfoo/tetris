@@ -13,6 +13,10 @@ fall_speed = 5  # Adjust this number to control falling speed
 fall_counter = 0
 
 
+
+# Grid visibility toggle
+show_grid = False  # Set to False to hide the grid
+
 # Tetromino shapes and colors
 SHAPES_COLORS = {
     'I': ([[1, 1, 1, 1]], (0, 255, 255)),
@@ -30,12 +34,14 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Tetris")
 
 # Functions
-def draw_grid():
-    for x in range(0, WIDTH, GRID_SIZE):
-        pygame.draw.line(screen, WHITE, (x, 0), (x, HEIGHT))
-    for y in range(0, HEIGHT, GRID_SIZE):
-        pygame.draw.line(screen, WHITE, (0, y), (WIDTH, y))
 
+def draw_grid():
+    if show_grid:
+        for x in range(0, WIDTH, GRID_SIZE):
+            pygame.draw.line(screen, WHITE, (x, 0), (x, HEIGHT))
+        for y in range(0, HEIGHT, GRID_SIZE):
+            pygame.draw.line(screen, WHITE, (0, y), (WIDTH, y))
+            
 def draw_block(x, y, shape, color):
     for row in range(len(shape)):
         for col in range(len(shape[row])):
@@ -92,7 +98,16 @@ def calculate_ghost_piece(x, y, shape, grid):
         ghost_y += 1
     return ghost_y
 
+
 def draw_ghost_piece(x, y, shape, grid, screen):
+    ghost_y = calculate_ghost_piece(x, y, shape, grid)
+    ghost_color = (200, 200, 200)  # Light grey color for the ghost piece
+    for row in range(len(shape)):
+        for col in range(len(shape[row])):
+            if shape[row][col]:
+                pygame.draw.rect(
+                    screen, ghost_color, (x * GRID_SIZE + col * GRID_SIZE, ghost_y * GRID_SIZE + row * GRID_SIZE, GRID_SIZE, GRID_SIZE))  # Filled rectangle
+
     ghost_y = calculate_ghost_piece(x, y, shape, grid)
     ghost_color = (200, 200, 200)  # Light grey color for the ghost piece
     for row in range(len(shape)):
