@@ -85,6 +85,23 @@ def clear_lines(grid, color_grid):
             i -= 1  # Only move to the next row if the current row was not cleared
     return cleared_lines
 
+
+def calculate_ghost_piece(x, y, shape, grid):
+    ghost_y = y
+    while not collide(x, ghost_y + 1, shape, grid):
+        ghost_y += 1
+    return ghost_y
+
+def draw_ghost_piece(x, y, shape, grid, screen):
+    ghost_y = calculate_ghost_piece(x, y, shape, grid)
+    ghost_color = (200, 200, 200)  # Light grey color for the ghost piece
+    for row in range(len(shape)):
+        for col in range(len(shape[row])):
+            if shape[row][col]:
+                pygame.draw.rect(
+                    screen, ghost_color, (x * GRID_SIZE + col * GRID_SIZE, ghost_y * GRID_SIZE + row * GRID_SIZE, GRID_SIZE, GRID_SIZE), 1)  # 1 is for border width
+
+
 running = True
 while running:
     for event in pygame.event.get():
@@ -164,6 +181,7 @@ while running:
     draw_grid()
 
     # Draw the current shape
+    draw_ghost_piece(current_x, current_y, current_shape, grid, screen)
     draw_block(current_x * GRID_SIZE, current_y * GRID_SIZE, current_shape, current_color)
 
     # Draw the locked blocks with their respective colors
