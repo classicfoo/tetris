@@ -15,7 +15,7 @@ fall_counter = 0
 
 
 # Grid visibility toggle
-show_grid = False  # Set to False to hide the grid
+show_grid = True  # Set to False to hide the grid
 
 # Tetromino shapes and colors
 SHAPES_COLORS = {
@@ -64,9 +64,11 @@ def rotate(shape):
 # Initialize game variables
 grid = [[0] * GRID_WIDTH for _ in range(GRID_HEIGHT)]
 current_x, current_y = GRID_WIDTH // 2 - 1, 0
+hard_dropped = False
 current_shape_name = random.choice(list(SHAPES_COLORS.keys()))
 current_shape, current_color = SHAPES_COLORS[current_shape_name]
 score = 0
+hard_dropped = False
 
 clock = pygame.time.Clock()
 
@@ -125,68 +127,68 @@ while running:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
                 current_y = hard_drop(current_x, current_y, current_shape, grid)
+                hard_dropped = True
             elif event.key == pygame.K_UP:
                 rotated_shape = rotate(current_shape)
                 if not collide(current_x, current_y, rotated_shape, grid):
                     current_shape = rotated_shape
 
-    # Check the state of all keys for continuous movement
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        if not collide(current_x - 1, current_y, current_shape, grid):
-            current_x -= 1
-    if keys[pygame.K_RIGHT]:
-        if not collide(current_x + 1, current_y, current_shape, grid):
-            current_x += 1
-    if keys[pygame.K_DOWN]:
-        if not collide(current_x, current_y + 1, current_shape, grid):
-            current_y += 1
+    if hard_dropped == False:
+        # Check the state of all keys for continuous movement
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            if not collide(current_x - 1, current_y, current_shape, grid):
+                current_x -= 1
+        if keys[pygame.K_RIGHT]:
+            if not collide(current_x + 1, current_y, current_shape, grid):
+                current_x += 1
+        if keys[pygame.K_DOWN]:
+            if not collide(current_x, current_y + 1, current_shape, grid):
+                current_y += 1
 
 
     fall_counter += 1
     if fall_counter >= fall_speed:
+        # Move the current shape down
         if not collide(current_x, current_y + 1, current_shape, grid):
             current_y += 1
         else:
-            # Your existing logic for when a Tetromino settles       
-            # Move the current shape down
-            if not collide(current_x, current_y + 1, current_shape, grid):
-                current_y += 1
-            else:
-                # Clear lines if any and update the score
-                print('Grid before clearing:', grid)
-                lines_cleared = clear_lines(grid, color_grid)
-                print('Grid after clearing:', grid)
-                print('Lines cleared:', lines_cleared)
-                score += lines_cleared * 100
+            # Clear lines if any and update the score
+            print('Grid before clearing:', grid)
+            lines_cleared = clear_lines(grid, color_grid)
+            print('Grid after clearing:', grid)
+            print('Lines cleared:', lines_cleared)
+            score += lines_cleared * 100
 
-                # Lock the current shape in place and update the color grid
-                for row in range(len(current_shape)):
-                    for col in range(len(current_shape[row])):
-                        if current_shape[row][col]:
-                            grid[current_y + row][current_x + col] = 1
-                            color_grid[current_y + row][current_x + col] = current_color
+            # Lock the current shape in place and update the color grid
+            for row in range(len(current_shape)):
+                for col in range(len(current_shape[row])):
+                    if current_shape[row][col]:
+                        grid[current_y + row][current_x + col] = 1
+                        color_grid[current_y + row][current_x + col] = current_color
 
-                # Clear lines if any and update the score
-                print('Grid before clearing:', grid)
-                lines_cleared = clear_lines(grid, color_grid)
-                print('Grid after clearing:', grid)
-                print('Lines cleared:', lines_cleared)
-                score += lines_cleared * 100
+            # Clear lines if any and update the score
+            print('Grid before clearing:', grid)
+            lines_cleared = clear_lines(grid, color_grid)
+            print('Grid after clearing:', grid)
+            print('Lines cleared:', lines_cleared)
+            score += lines_cleared * 100
 
-                # Generate a new random shape
-                current_x, current_y = GRID_WIDTH // 2 - 1, 0
-                current_shape_name = random.choice(list(SHAPES_COLORS.keys()))
-                current_shape, current_color = SHAPES_COLORS[current_shape_name]
+            # Generate a new random shape
+            current_x, current_y = GRID_WIDTH // 2 - 1, 0
+            hard_dropped = False
+            current_shape_name = random.choice(list(SHAPES_COLORS.keys()))
+            current_shape, current_color = SHAPES_COLORS[current_shape_name]
 
-                # Generate a new random shape
-                current_x, current_y = GRID_WIDTH // 2 - 1, 0
-                current_shape_name = random.choice(list(SHAPES_COLORS.keys()))
-                current_shape, current_color = SHAPES_COLORS[current_shape_name]
+            # Generate a new random shape
+            current_x, current_y = GRID_WIDTH // 2 - 1, 0
+            hard_dropped = False
+            current_shape_name = random.choice(list(SHAPES_COLORS.keys()))
+            current_shape, current_color = SHAPES_COLORS[current_shape_name]
 
-                # Check for game over
-                if collide(current_x, current_y, current_shape, grid):
-                    running = False
+            # Check for game over
+            if collide(current_x, current_y, current_shape, grid):
+                running = False
         fall_counter = 0
 
     # Clear the screen
