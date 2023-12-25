@@ -64,6 +64,12 @@ score = 0
 
 clock = pygame.time.Clock()
 
+
+def hard_drop(x, y, shape, grid):
+    while not collide(x, y + 1, shape, grid):
+        y += 1
+    return y
+
 def clear_lines(grid, color_grid):
     cleared_lines = 0
     i = len(grid) - 1
@@ -85,7 +91,9 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_UP:
+            if event.key == pygame.K_SPACE:
+                current_y = hard_drop(current_x, current_y, current_shape, grid)
+            elif event.key == pygame.K_UP:
                 rotated_shape = rotate(current_shape)
                 if not collide(current_x, current_y, rotated_shape, grid):
                     current_shape = rotated_shape
