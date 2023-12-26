@@ -12,10 +12,14 @@ color_grid = [[None] * GRID_WIDTH for _ in range(GRID_HEIGHT)]
 fall_speed = 5  # Adjust this number to control falling speed
 fall_counter = 0
 
+# Load the image
+block_image = pygame.image.load('block.png')
+# Optionally, scale the image to fit your grid size
+# block_image = pygame.transform.scale(block_image, (GRID_SIZE, GRID_SIZE))
 
 
 # Grid visibility toggle
-show_grid = True  # Set to False to hide the grid
+show_grid = False  # Set to False to hide the grid
 
 # Tetromino shapes and colors
 SHAPES_COLORS = {
@@ -42,12 +46,12 @@ def draw_grid():
         for y in range(0, HEIGHT, GRID_SIZE):
             pygame.draw.line(screen, WHITE, (0, y), (WIDTH, y))
             
-def draw_block(x, y, shape, color):
+def draw_block(x, y, shape):
     for row in range(len(shape)):
         for col in range(len(shape[row])):
             if shape[row][col]:
-                pygame.draw.rect(
-                    screen, color, (x + col * GRID_SIZE, y + row * GRID_SIZE, GRID_SIZE, GRID_SIZE))
+                # Draw the image instead of a rectangle
+                screen.blit(block_image, (x + col * GRID_SIZE, y + row * GRID_SIZE))
 
 def collide(x, y, shape, grid):
     for row in range(len(shape)):
@@ -102,6 +106,7 @@ def calculate_ghost_piece(x, y, shape, grid):
 
 
 def draw_ghost_piece(x, y, shape, grid, screen):
+    # Fill ghost piece colour
     ghost_y = calculate_ghost_piece(x, y, shape, grid)
     ghost_color = (200, 200, 200)  # Light grey color for the ghost piece
     for row in range(len(shape)):
@@ -110,14 +115,24 @@ def draw_ghost_piece(x, y, shape, grid, screen):
                 pygame.draw.rect(
                     screen, ghost_color, (x * GRID_SIZE + col * GRID_SIZE, ghost_y * GRID_SIZE + row * GRID_SIZE, GRID_SIZE, GRID_SIZE))  # Filled rectangle
 
-    ghost_y = calculate_ghost_piece(x, y, shape, grid)
-    ghost_color = (200, 200, 200)  # Light grey color for the ghost piece
-    for row in range(len(shape)):
-        for col in range(len(shape[row])):
-            if shape[row][col]:
-                pygame.draw.rect(
-                    screen, ghost_color, (x * GRID_SIZE + col * GRID_SIZE, ghost_y * GRID_SIZE + row * GRID_SIZE, GRID_SIZE, GRID_SIZE), 1)  # 1 is for border width
+    # Draw borders for ghost piece blocks
+    # ghost_y = calculate_ghost_piece(x, y, shape, grid)
+    # ghost_color = WHITE  # Light grey color for the ghost piece
+    # for row in range(len(shape)):
+    #     for col in range(len(shape[row])):
+    #         if shape[row][col]:
+    #             pygame.draw.rect(
+    #                 screen, ghost_color, (x * GRID_SIZE + col * GRID_SIZE, ghost_y *  GRID_SIZE + row * GRID_SIZE, GRID_SIZE, GRID_SIZE), 1)  # 1 is for border width
 
+def draw_locked_blocks(screen, block_image, color_grid, grid_size, grid_width, grid_height):
+    for row in range(grid_height):
+        for col in range(grid_width):
+            if color_grid[row][col]:
+                # Draw the block image
+                screen.blit(block_image, (col * grid_size, row * grid_size))
+
+# Usage in your main game loop
+# draw_locked_blocks(screen, block_image, color_grid, GRID_SIZE, GRID_WIDTH, GRID_HEIGHT)
 
 running = True
 while running:
@@ -199,14 +214,9 @@ while running:
 
     # Draw the current shape
     draw_ghost_piece(current_x, current_y, current_shape, grid, screen)
-    draw_block(current_x * GRID_SIZE, current_y * GRID_SIZE, current_shape, current_color)
+    draw_block(current_x * GRID_SIZE, current_y * GRID_SIZE, current_shape)
 
-    # Draw the locked blocks with their respective colors
-    for row in range(GRID_HEIGHT):
-        for col in range(GRID_WIDTH):
-            if color_grid[row][col]:
-                pygame.draw.rect(
-                    screen, color_grid[row][col], (col * GRID_SIZE, row * GRID_SIZE, GRID_SIZE, GRID_SIZE))
+    draw_locked_blocks(screen, block_image, color_grid, GRID_SIZE, GRID_WIDTH, GRID_HEIGHT)
 
     # Display score
     font = pygame.font.Font(None, 36)
