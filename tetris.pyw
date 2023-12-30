@@ -1,3 +1,4 @@
+import pickle
 import pygame
 import random
 
@@ -38,6 +39,17 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Tetris")
 
 # Functions
+
+def save_high_score(new_high_score):
+    with open('high_score.dat', 'wb') as file:
+        pickle.dump(new_high_score, file)
+
+def load_high_score():
+    try:
+        with open('high_score.dat', 'rb') as file:
+            return pickle.load(file)
+    except (FileNotFoundError, EOFError):
+        return 0
 
 def draw_grid():
     if show_grid:
@@ -134,6 +146,10 @@ def draw_locked_blocks(screen, block_image, color_grid, grid_size, grid_width, g
 # Usage in your main game loop
 # draw_locked_blocks(screen, block_image, color_grid, GRID_SIZE, GRID_WIDTH, GRID_HEIGHT)
 
+high_score = load_high_score()
+game_over = False
+ask_restart = False
+
 running = True
 while running:
     for event in pygame.event.get():
@@ -203,7 +219,11 @@ while running:
 
             # Check for game over
             if collide(current_x, current_y, current_shape, grid):
+                if score > high_score:
+                    high_score = score
+                    save_high_score(high_score)
                 running = False
+
         fall_counter = 0
 
     # Clear the screen
@@ -221,8 +241,10 @@ while running:
     # Display score
     font = pygame.font.Font(None, 36)
     score_text = font.render(f"Score: {score}", True, WHITE)
+    high_score_text = font.render(f"High Score: {high_score}", True, WHITE)
+    screen.blit(high_score_text, (10, 50))  # Adjust position as needed
     screen.blit(score_text, (10, 10))
-
+    
     pygame.display.flip()
     clock.tick(10)
 
