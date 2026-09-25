@@ -4,11 +4,6 @@ import kotlin.math.max
 import kotlin.math.pow
 
 class GameEngine(seed: Long = System.nanoTime()) {
-    companion object {
-        const val LOCK_DELAY_MS = 500L
-        const val MAX_LOCK_RESETS = 15
-    }
-
     private val initialSeed = seed
     private var restartCount = 0L
     private var bag = PieceBag(java.util.Random(seed))
@@ -280,7 +275,10 @@ class GameEngine(seed: Long = System.nanoTime()) {
         return max(50L, (seconds * 1_000).toLong())
     }
 
-    companion object KickTables {
+    companion object {
+        const val LOCK_DELAY_MS = 500L
+        const val MAX_LOCK_RESETS = 15
+
         private val JLSTZ_KICKS = mapOf(
             (Rotation.SPAWN to Rotation.RIGHT) to listOf(Cell(0, 0), Cell(-1, 0), Cell(-1, 1), Cell(0, -2), Cell(-1, -2)),
             (Rotation.RIGHT to Rotation.SPAWN) to listOf(Cell(0, 0), Cell(1, 0), Cell(1, -1), Cell(0, 2), Cell(1, 2)),
