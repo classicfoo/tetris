@@ -60,14 +60,33 @@ internal object BoardRules {
         return result.map { it.toList() }
     }
 
-    fun clearLines(board: List<List<Tetromino?>>): Pair<List<List<Tetromino?>>, Int> {
-        val remaining = board.filter { row -> row.any { it == null } }
-        val cleared = BOARD_HEIGHT - remaining.size
+    data class LineClearResult(
+        val board: List<List<Tetromino?>>,
+        val count: Int,
+        val clearedRows: List<Int>,
+    )
+
+    fun clearLinesWithRows(board: List<List<Tetromino?>>): LineClearResult {
+        val clearedRows = board.mapIndexedNotNull { index, row ->
+            index.takeIf { row.all { it != null } }
+        }
+        val remaining = board.filterIndexed { index, _ -> index !in clearedRows }
+        val cleared = clearedRows.size
         val result = MutableList(BOARD_HEIGHT) { List<Tetromino?>(BOARD_WIDTH) { null } }
         remaining.forEachIndexed { index, row ->
             result[BOARD_HEIGHT - remaining.size + index] = row
         }
-        return result to cleared
+        return LineClearResult(
+            board = result,
+            count = cleared,
+            clearedRows = clearedRows,
+        )
+    }
+
+    /** Compatibility wrapper for callers that only need the resulting board and count. */
+    fun clearLines(board: List<List<Tetromino?>>): Pair<List<List<Tetromino?>>, Int> {
+        val result = clearLinesWithRows(board)
+        return result.board to result.count
     }
 
     fun isEmpty(board: List<List<Tetromino?>>): Boolean = board.all { row -> row.all { it == null } }

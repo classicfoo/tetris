@@ -4,13 +4,19 @@ import com.classicfoo.tetris.engine.GameEvent
 import java.io.ByteArrayOutputStream
 import java.util.ArrayDeque
 import kotlin.math.abs
-import kotlin.math.floor
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+
+const val MIDI_TICKS_PER_BEAT = 96
+const val TETRIS_LOOP_BEATS = 256
+const val TETRIS_LOOP_END_TICK = MIDI_TICKS_PER_BEAT * TETRIS_LOOP_BEATS
 
 data class MidiSong(
     val name: String,
     val bytes: ByteArray,
+    val loopStartTick: Long = 0L,
+    val loopEndTick: Long? = null,
 )
 
 data class MidiNote(
@@ -27,11 +33,24 @@ data class MidiTempo(
     val microsecondsPerQuarter: Int,
 )
 
+data class MidiTimeSignature(
+    val tick: Long,
+    val numerator: Int,
+    val denominator: Int,
+)
+
+data class MidiMarker(
+    val tick: Long,
+    val name: String,
+)
+
 data class ParsedMidiSong(
     val division: Int,
     val notes: List<MidiNote>,
     val tempos: List<MidiTempo>,
     val endTick: Long,
+    val timeSignatures: List<MidiTimeSignature> = emptyList(),
+    val markers: List<MidiMarker> = emptyList(),
 )
 
 /** Small Standard MIDI 1.0 parser for the bundled original songs. */
@@ -44,12 +63,15 @@ object MidiParser {
         val format = reader.readUInt16()
         require(format in 0..1) { "Only MIDI formats 0 and 1 are supported" }
         val trackCount = reader.readUInt16()
+        require(trackCount > 0) { "MIDI must contain at least one track" }
         val division = reader.readUInt16()
-        require(division > 0 && division and 0x8000 == 0) { "SMPTE MIDI timing is unsupported" }
+        require(division > 0 && (division and 0x8000) == 0) { "SMPTE MIDI timing is unsupported" }
         reader.skip(headerLength - 6)
 
         val notes = mutableListOf<MidiNote>()
         val tempos = mutableListOf<MidiTempo>()
+        val timeSignatures = mutableListOf<MidiTimeSignature>()
+        val markers = mutableListOf<MidiMarker>()
         val programs = IntArray(16)
         var endTick = 0L
 
@@ -77,14 +99,23 @@ object MidiParser {
                     status == 0xFF -> {
                         val metaType = reader.readUInt8()
                         val length = reader.readVariableLength().toInt()
-                        if (metaType == 0x51 && length == 3) {
-                            tempos += MidiTempo(tick, reader.readUInt24())
-                        } else {
-                            reader.skip(length)
-                        }
-                        if (metaType == 0x2F) {
-                            reader.skip(length)
-                            break
+                        val payload = reader.readBytes(length)
+                        when (metaType) {
+                            0x2F -> break
+                            0x51 -> if (payload.size == 3) {
+                                tempos += MidiTempo(tick, unsigned24(payload))
+                            }
+                            0x58 -> if (payload.size >= 2) {
+                                val exponent = payload[1].toInt() and 0xFF
+                                if (exponent < 31) {
+                                    timeSignatures += MidiTimeSignature(
+                                        tick = tick,
+                                        numerator = payload[0].toInt() and 0xFF,
+                                        denominator = 1 shl exponent,
+                                    )
+                                }
+                            }
+                            0x06 -> markers += MidiMarker(tick, payload.decodeToString())
                         }
                     }
                     status == 0xF0 || status == 0xF7 -> reader.skip(reader.readVariableLength().toInt())
@@ -149,15 +180,22 @@ object MidiParser {
             notes = notes.sortedBy { it.startTick },
             tempos = tempos.sortedBy { it.tick },
             endTick = endTick,
+            timeSignatures = timeSignatures.sortedBy { it.tick },
+            markers = markers.sortedBy { it.tick },
         )
     }
+
+    private fun unsigned24(bytes: ByteArray): Int =
+        ((bytes[0].toInt() and 0xFF) shl 16) or
+            ((bytes[1].toInt() and 0xFF) shl 8) or
+            (bytes[2].toInt() and 0xFF)
 
     private data class OpenNote(
         val startTick: Long,
         val pitch: Int,
         val velocity: Int,
         val program: Int,
-        val channel: Int = 0,
+        val channel: Int,
     )
 
     private class ByteReader(private val bytes: ByteArray) {
@@ -170,8 +208,6 @@ object MidiParser {
 
         fun readUInt16(): Int = (readUInt8() shl 8) or readUInt8()
 
-        fun readUInt24(): Int = (readUInt8() shl 16) or (readUInt8() shl 8) or readUInt8()
-
         fun readInt32(): Int {
             val value = (readUInt8() shl 24) or (readUInt8() shl 16) or (readUInt8() shl 8) or readUInt8()
             require(value >= 0) { "MIDI chunk is too large" }
@@ -180,6 +216,11 @@ object MidiParser {
 
         fun readAscii(length: Int): String = buildString {
             repeat(length) { append(readUInt8().toChar()) }
+        }
+
+        fun readBytes(length: Int): ByteArray {
+            require(length >= 0 && position + length <= bytes.size) { "Invalid MIDI length" }
+            return bytes.copyOfRange(position, position + length).also { position += length }
         }
 
         fun readVariableLength(): Long {
@@ -210,28 +251,29 @@ data class TimedMidiNote(
     val program: Int,
 )
 
-class MidiSequencer(song: ParsedMidiSong) {
+class MidiSequencer(private val song: ParsedMidiSong) {
     val notes: List<TimedMidiNote> = song.notes.map { note ->
         TimedMidiNote(
             channel = note.channel,
             pitch = note.pitch,
             velocity = note.velocity,
-            startMicros = tickToMicros(note.startTick, song),
-            endMicros = tickToMicros(note.endTick, song),
+            startMicros = microsAtTick(note.startTick),
+            endMicros = microsAtTick(note.endTick),
             program = note.program,
         )
     }
     val durationMicros: Long = max(
-        tickToMicros(song.endTick, song),
+        microsAtTick(song.endTick),
         notes.maxOfOrNull { it.endMicros } ?: 0L,
     )
 
-    private fun tickToMicros(tick: Long, song: ParsedMidiSong): Long {
+    fun microsAtTick(tick: Long): Long {
+        require(tick >= 0) { "MIDI tick cannot be negative" }
         var previousTick = 0L
         var tempo = MidiParser.DEFAULT_TEMPO_US
         var micros = 0.0
-        song.tempos.forEach { change ->
-            if (change.tick > tick) return@forEach
+        for (change in song.tempos) {
+            if (change.tick > tick) break
             if (change.tick > previousTick) {
                 micros += (change.tick - previousTick) * tempo.toDouble() / song.division
                 previousTick = change.tick
@@ -245,42 +287,149 @@ class MidiSequencer(song: ParsedMidiSong) {
     }
 }
 
+data class RenderedPcm(
+    val samples: ShortArray,
+    val loopStartFrame: Int,
+    val loopEndFrame: Int,
+    val durationMicros: Long,
+    val sampleRate: Int = ChiptuneSynth.SAMPLE_RATE,
+) {
+    init {
+        require(sampleRate > 0)
+        require(loopStartFrame in 0 until loopEndFrame)
+        require(loopEndFrame <= samples.size)
+    }
+}
+
+/** Thread-safe PCM reader used by the streaming Android AudioTrack writer and JVM tests. */
+class PcmCursor(private val pcm: RenderedPcm) {
+    private var frame: Int = pcm.loopStartFrame
+    private var paused = false
+    private var released = false
+
+    @Synchronized
+    fun read(destination: ShortArray): Int = read(destination, 0, destination.size)
+
+    @Synchronized
+    fun read(destination: ShortArray, offset: Int, length: Int): Int {
+        require(offset >= 0 && length >= 0 && offset + length <= destination.size)
+        if (paused || released || length == 0) return 0
+
+        var copied = 0
+        while (copied < length) {
+            if (frame >= pcm.loopEndFrame) frame = pcm.loopStartFrame
+            val available = pcm.loopEndFrame - frame
+            if (available <= 0) {
+                frame = pcm.loopStartFrame
+                continue
+            }
+            val count = min(length - copied, available)
+            pcm.samples.copyInto(destination, offset + copied, frame, frame + count)
+            frame += count
+            copied += count
+        }
+        return copied
+    }
+
+    @Synchronized
+    fun pause() {
+        if (!released) paused = true
+    }
+
+    @Synchronized
+    fun resume() {
+        if (!released) paused = false
+    }
+
+    @Synchronized
+    fun reset() {
+        if (!released) frame = pcm.loopStartFrame
+    }
+
+    @Synchronized
+    fun release() {
+        released = true
+        paused = true
+    }
+
+    @Synchronized
+    fun positionFrame(): Int = frame
+
+    @Synchronized
+    fun isPaused(): Boolean = paused
+
+    @Synchronized
+    fun isReleased(): Boolean = released
+}
+
 object ChiptuneSynth {
     const val SAMPLE_RATE = 22_050
 
-    fun render(song: MidiSong, maxSeconds: Int = 32): ShortArray {
-        val sequence = MidiSequencer(MidiParser.parse(song.bytes))
-        val duration = min(sequence.durationMicros, maxSeconds * 1_000_000L) + 120_000L
-        val samples = (duration * SAMPLE_RATE / 1_000_000L).toInt().coerceAtLeast(1)
-        val mix = FloatArray(samples)
+    /** Renders a complete exact-length song loop for the streaming output path. */
+    fun renderSong(song: MidiSong): RenderedPcm {
+        val parsed = MidiParser.parse(song.bytes)
+        require(parsed.division == MIDI_TICKS_PER_BEAT) { "Tetris songs must use 96 ticks per beat" }
+        val loopEndTick = song.loopEndTick ?: parsed.endTick
+        require(song.loopStartTick >= 0L && song.loopStartTick < loopEndTick)
+        require(loopEndTick == parsed.endTick) {
+            "MIDI end tick ${parsed.endTick} does not match loop end $loopEndTick"
+        }
+
+        val sequence = MidiSequencer(parsed)
+        val durationMicros = sequence.microsAtTick(loopEndTick)
+        val sampleCount = (durationMicros * SAMPLE_RATE / 1_000_000L).toInt().coerceAtLeast(1)
+        val loopStartFrame = (sequence.microsAtTick(song.loopStartTick) * SAMPLE_RATE / 1_000_000L)
+            .toInt()
+            .coerceIn(0, sampleCount - 1)
+        val mix = FloatArray(sampleCount)
 
         sequence.notes.forEach { note ->
-            val start = (note.startMicros * SAMPLE_RATE / 1_000_000L).toInt().coerceIn(0, samples)
-            if (start >= samples) return@forEach
-            val end = (note.endMicros * SAMPLE_RATE / 1_000_000L).toInt().coerceIn(start + 1, samples)
+            val start = (note.startMicros * SAMPLE_RATE / 1_000_000L).toInt().coerceIn(0, sampleCount)
+            if (start >= sampleCount || note.channel !in setOf(0, 1, 2, 9)) return@forEach
+            val end = (note.endMicros * SAMPLE_RATE / 1_000_000L).toInt()
+                .coerceIn(start + 1, sampleCount)
             val frequency = 440.0 * 2.0.pow((note.pitch - 69) / 12.0)
             val amplitude = note.velocity / 127f * if (note.channel == 9) 0.16f else 0.19f
-            var noise = (note.pitch * 7919 + start * 104729) or 1
+            var noise = (note.pitch * 7_919L + start * 104_729L) or 1L
             for (sample in start until end) {
                 val elapsed = sample - start
                 val remaining = end - sample
                 val envelope = min(1f, elapsed / (SAMPLE_RATE * 0.008f)) *
                     min(1f, remaining / (SAMPLE_RATE * 0.045f))
                 val phase = ((elapsed * frequency / SAMPLE_RATE) % 1.0).toFloat()
-                val wave = if (note.channel == 9) {
-                    noise = noise * 1_664_525 + 1_013_904_223
-                    ((noise ushr 16) and 0x7FFF) / 16_384f - 1f
-                } else if (note.channel % 3 == 1 || note.program in 80..84) {
-                    1f - 4f * abs(phase - 0.5f)
-                } else if (note.channel % 3 == 2) {
-                    if (phase < 0.25f) 1f else -1f
-                } else {
-                    if (phase < 0.5f) 1f else -1f
+                val wave = when (note.channel) {
+                    9 -> {
+                        noise = noise * 1_664_525L + 1_013_904_223L
+                        ((noise ushr 16) and 0x7FFF) / 16_384f - 1f
+                    }
+                    1 -> 1f - 4f * abs(phase - 0.5f)
+                    2 -> if (phase < 0.25f) 1f else -1f
+                    else -> if (phase < 0.5f) 1f else -1f
                 }
                 mix[sample] += wave * amplitude * envelope
             }
         }
-        return toPcm(mix)
+
+        val pcm = toPcm(mix)
+        smoothLoopBoundary(pcm, loopStartFrame, sampleCount)
+        return RenderedPcm(
+            samples = pcm,
+            loopStartFrame = loopStartFrame,
+            loopEndFrame = sampleCount,
+            durationMicros = durationMicros,
+        )
+    }
+
+    /** Compatibility helper for short-lived callers; music playback uses renderSong(). */
+    fun render(song: MidiSong, maxSeconds: Int = 32): ShortArray {
+        require(maxSeconds > 0)
+        val rendered = renderSong(song)
+        val maximumSamples = maxSeconds * SAMPLE_RATE
+        return if (rendered.samples.size <= maximumSamples) {
+            rendered.samples
+        } else {
+            rendered.samples.copyOf(maximumSamples)
+        }
     }
 
     fun renderEffect(event: GameEvent): ShortArray {
@@ -324,11 +473,24 @@ object ChiptuneSynth {
         return toPcm(mix)
     }
 
+    private fun smoothLoopBoundary(samples: ShortArray, loopStart: Int, loopEnd: Int) {
+        val fadeFrames = min(256, (loopEnd - loopStart) / 2)
+        for (index in 0 until fadeFrames) {
+            val startScale = index.toFloat() / fadeFrames
+            val endScale = (fadeFrames - index - 1).toFloat() / fadeFrames
+            samples[loopStart + index] = (samples[loopStart + index] * startScale).toInt().toShort()
+            val endIndex = loopEnd - fadeFrames + index
+            samples[endIndex] = (samples[endIndex] * endScale).toInt().toShort()
+        }
+    }
+
     private fun toPcm(mix: FloatArray): ShortArray {
         val peak = mix.maxOfOrNull { abs(it) }?.coerceAtLeast(0.001f) ?: 1f
         val gain = min(0.86f / peak, 1.0f)
         return ShortArray(mix.size) { index ->
-            (mix[index] * gain * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            (mix[index] * gain * Short.MAX_VALUE).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                .toShort()
         }
     }
 
@@ -352,28 +514,77 @@ data class SongNote(
 )
 
 object StandardMidiBuilder {
-    private const val TICKS_PER_BEAT = 96
+    const val TICKS_PER_BEAT = MIDI_TICKS_PER_BEAT
 
-    fun build(bpm: Int, notes: List<SongNote>): ByteArray {
+    fun build(
+        bpm: Int,
+        notes: List<SongNote>,
+        endTick: Int = defaultEndTick(notes),
+        loopStartTick: Int = 0,
+        loopEndTick: Int = endTick,
+        timeSignatureNumerator: Int = 4,
+        timeSignatureDenominator: Int = 4,
+    ): ByteArray {
+        require(bpm > 0) { "BPM must be positive" }
+        require(endTick >= 0) { "MIDI end tick cannot be negative" }
+        require(loopStartTick in 0 until loopEndTick && loopEndTick == endTick) {
+            "Loop markers must describe the complete MIDI duration"
+        }
+        require(timeSignatureNumerator in 1..32) { "Invalid time-signature numerator" }
+        require(timeSignatureDenominator > 0 && (timeSignatureDenominator and (timeSignatureDenominator - 1)) == 0) {
+            "MIDI denominator must be a power of two"
+        }
+
         val events = mutableListOf<BuildEvent>()
-        events += BuildEvent(0, 0, byteArrayOf(0xFF.toByte(), 0x51, 0x03, (60_000_000 / bpm shr 16).toByte(), (60_000_000 / bpm shr 8).toByte(), (60_000_000 / bpm).toByte()))
-        notes.map { it.channel to it.program }.distinct().forEach { (channel, program) ->
-            events += BuildEvent(0, 1, byteArrayOf((0xC0 or channel).toByte(), program.toByte()))
-        }
+        val microsecondsPerQuarter = (60_000_000L / bpm).toInt().coerceIn(1, 0xFFFFFF)
+        events += BuildEvent(0L, 0, meta(0x51, byteArrayOf(
+            (microsecondsPerQuarter ushr 16).toByte(),
+            (microsecondsPerQuarter ushr 8).toByte(),
+            microsecondsPerQuarter.toByte(),
+        )))
+        events += BuildEvent(0L, 0, meta(0x58, byteArrayOf(
+            timeSignatureNumerator.toByte(),
+            denominatorExponent(timeSignatureDenominator).toByte(),
+            24,
+            8,
+        )))
+        events += BuildEvent(loopStartTick.toLong(), 0, meta(0x06, "LOOP_START".encodeToByteArray()))
+        events += BuildEvent(loopEndTick.toLong(), 4, meta(0x06, "LOOP_END".encodeToByteArray()))
+
+        notes.map { it.channel to it.program.coerceIn(0, 127) }
+            .distinctBy { it.first }
+            .forEach { (channel, program) ->
+                require(channel in 0..15) { "MIDI channel must be in 0..15" }
+                events += BuildEvent(0L, 1, byteArrayOf((0xC0 or channel).toByte(), program.toByte()))
+            }
+
         notes.forEach { note ->
-            val start = (note.startBeat * TICKS_PER_BEAT).toInt().coerceAtLeast(0)
-            val end = ((note.startBeat + note.durationBeats) * TICKS_PER_BEAT).toInt().coerceAtLeast(start + 1)
-            events += BuildEvent(start, 2, byteArrayOf((0x90 or note.channel).toByte(), note.pitch.toByte(), note.velocity.coerceIn(1, 127).toByte()))
-            events += BuildEvent(end, 0, byteArrayOf((0x80 or note.channel).toByte(), note.pitch.toByte(), 0))
+            require(note.startBeat.isFinite() && note.durationBeats.isFinite() && note.startBeat >= 0.0 && note.durationBeats > 0.0)
+            require(note.pitch in 0..127) { "MIDI pitch must be in 0..127" }
+            require(note.channel in 0..15) { "MIDI channel must be in 0..15" }
+            val start = beatToTick(note.startBeat)
+            val end = max(start + 1L, beatToTick(note.startBeat + note.durationBeats))
+            require(end <= endTick) { "Note ends after the declared MIDI duration" }
+            events += BuildEvent(
+                start,
+                3,
+                byteArrayOf((0x90 or note.channel).toByte(), note.pitch.toByte(), note.velocity.coerceIn(1, 127).toByte()),
+            )
+            events += BuildEvent(
+                end,
+                2,
+                byteArrayOf((0x80 or note.channel).toByte(), note.pitch.toByte(), 0),
+            )
         }
+
         val track = ByteArrayOutputStream()
-        var previousTick = 0
+        var previousTick = 0L
         events.sortedWith(compareBy<BuildEvent> { it.tick }.thenBy { it.order }).forEach { event ->
             writeVariableLength(track, event.tick - previousTick)
             track.write(event.bytes)
             previousTick = event.tick
         }
-        writeVariableLength(track, 0)
+        writeVariableLength(track, endTick - previousTick)
         track.write(byteArrayOf(0xFF.toByte(), 0x2F, 0x00))
 
         val output = ByteArrayOutputStream()
@@ -388,12 +599,34 @@ object StandardMidiBuilder {
         return output.toByteArray()
     }
 
-    private fun writeVariableLength(output: ByteArrayOutputStream, value: Int) {
-        var buffer = value and 0x7F
+    private fun defaultEndTick(notes: List<SongNote>): Int = notes.maxOfOrNull {
+        beatToTick(it.startBeat + it.durationBeats)
+    }?.toInt() ?: 0
+
+    private fun beatToTick(beat: Double): Long = ceil(beat * TICKS_PER_BEAT).toLong().coerceAtLeast(0L)
+
+    private fun denominatorExponent(denominator: Int): Int {
+        var value = denominator
+        var exponent = 0
+        while (value > 1) {
+            value = value ushr 1
+            exponent++
+        }
+        return exponent
+    }
+
+    private fun meta(type: Int, payload: ByteArray): ByteArray = byteArrayOf(
+        0xFF.toByte(),
+        type.toByte(),
+        payload.size.toByte(),
+    ) + payload
+
+    private fun writeVariableLength(output: ByteArrayOutputStream, value: Long) {
+        require(value >= 0L)
+        var buffer = (value and 0x7F).toInt()
         var remaining = value ushr 7
-        while (remaining > 0) {
-            buffer = buffer shl 8
-            buffer = buffer or ((remaining and 0x7F) or 0x80)
+        while (remaining > 0L) {
+            buffer = (buffer shl 8) or ((remaining and 0x7F).toInt() or 0x80)
             remaining = remaining ushr 7
         }
         while (true) {
@@ -415,5 +648,5 @@ object StandardMidiBuilder {
         output.write(value)
     }
 
-    private data class BuildEvent(val tick: Int, val order: Int, val bytes: ByteArray)
+    private data class BuildEvent(val tick: Long, val order: Int, val bytes: ByteArray)
 }

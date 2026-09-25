@@ -3,6 +3,7 @@ package com.classicfoo.tetris.ui
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 
 sealed interface GestureCommand {
     data object MoveLeft : GestureCommand
@@ -26,7 +27,8 @@ data class GesturePoint(
  */
 class GestureInterpreter(
     private val touchSlopPx: Float = 18f,
-    private val horizontalStepPx: Float = 28f,
+    private val horizontalStepPx: Float = 22f,
+    private val reversalHysteresisPx: Float = min(horizontalStepPx * 0.25f, touchSlopPx * 0.5f),
     private val softDropStepPx: Float = 24f,
     private val holdDistancePx: Float = 68f,
     private val hardDropDistancePx: Float = 76f,
@@ -38,7 +40,9 @@ class GestureInterpreter(
 
     private var down: GesturePoint? = null
     private var mode = Mode.NONE
-    private var horizontalSteps = 0
+    private var horizontalDirection = 0
+    private var horizontalRemainderPx = 0f
+    private var reverseRemainderPx = 0f
     private var softDropSteps = 0
     private var holdSent = false
     private var maxDownVelocity = 0f
@@ -48,7 +52,9 @@ class GestureInterpreter(
         down = point
         lastPoint = point
         mode = Mode.NONE
-        horizontalSteps = 0
+        horizontalDirection = 0
+        horizontalRemainderPx = 0f
+        reverseRemainderPx = 0f
         softDropSteps = 0
         holdSent = false
         maxDownVelocity = 0f
@@ -61,12 +67,17 @@ class GestureInterpreter(
         lastPoint = point
         val dx = point.x - start.x
         val dy = point.y - start.y
+        val previousMode = mode
         if (mode == Mode.NONE && max(abs(dx), abs(dy)) >= touchSlopPx) {
             mode = if (abs(dx) >= abs(dy)) Mode.HORIZONTAL else Mode.VERTICAL
         }
 
         return when (mode) {
-            Mode.HORIZONTAL -> horizontalCommands(dx)
+            Mode.HORIZONTAL -> if (previousMode == Mode.HORIZONTAL) {
+                horizontalCommandsForDelta(point.x - previous.x)
+            } else {
+                horizontalCommandsFromTotal(dx)
+            }
             Mode.VERTICAL -> verticalCommands(previous, point, dy)
             Mode.NONE -> emptyList()
         }
@@ -74,10 +85,12 @@ class GestureInterpreter(
 
     fun onUp(point: GesturePoint, viewWidth: Float): List<GestureCommand> {
         val start = down ?: return emptyList()
+        val previous = lastPoint ?: start
         val dx = point.x - start.x
         val dy = point.y - start.y
         val duration = (point.timeMs - start.timeMs).coerceAtLeast(1L)
         val commands = mutableListOf<GestureCommand>()
+        val previousMode = mode
 
         if (mode == Mode.NONE && max(abs(dx), abs(dy)) >= touchSlopPx) {
             mode = if (abs(dx) >= abs(dy)) Mode.HORIZONTAL else Mode.VERTICAL
@@ -91,16 +104,26 @@ class GestureInterpreter(
                     GestureCommand.RotateClockwise
                 }
             }
-            Mode.HORIZONTAL -> commands += horizontalCommands(dx)
-            Mode.VERTICAL -> if (dy >= hardDropDistancePx &&
-                (maxDownVelocity >= hardDropVelocityPxPerSecond || dy * 1_000f / duration >= hardDropVelocityPxPerSecond || duration <= hardSwipeDurationMs)
-            ) {
-                commands += GestureCommand.HardDrop
-            } else if (dy <= -holdDistancePx && !holdSent) {
-                commands += GestureCommand.Hold
-            } else if (dy > touchSlopPx && softDropSteps == 0) {
-                val targetSteps = floor((dy - touchSlopPx) / softDropStepPx).toInt()
-                repeat(targetSteps) { commands += GestureCommand.SoftDrop }
+            Mode.HORIZONTAL -> {
+                commands += if (previousMode == Mode.HORIZONTAL) {
+                    horizontalCommandsForDelta(point.x - previous.x)
+                } else {
+                    horizontalCommandsFromTotal(dx)
+                }
+            }
+            Mode.VERTICAL -> {
+                updateDownVelocity(previous, point)
+                if (holdSent) {
+                    // Hold is terminal for the gesture; do not turn a later rebound into a drop.
+                } else if (dy >= hardDropDistancePx &&
+                    (maxDownVelocity >= hardDropVelocityPxPerSecond ||
+                        dy * 1_000f / duration >= hardDropVelocityPxPerSecond ||
+                        duration <= hardSwipeDurationMs)
+                ) {
+                    commands += GestureCommand.HardDrop
+                } else {
+                    commands += verticalCommands(previous, point, dy)
+                }
             }
         }
         reset()
@@ -111,16 +134,50 @@ class GestureInterpreter(
         reset()
     }
 
-    private fun horizontalCommands(dx: Float): List<GestureCommand> {
-        val distance = abs(dx)
-        val targetSteps = floor(((distance - touchSlopPx) / horizontalStepPx).coerceAtLeast(0f)).toInt() +
-            if (distance >= touchSlopPx) 1 else 0
-        if (targetSteps <= horizontalSteps) return emptyList()
-        val command = if (dx >= 0f) GestureCommand.MoveRight else GestureCommand.MoveLeft
-        return buildList {
-            repeat(targetSteps - horizontalSteps) { add(command) }
-            horizontalSteps = targetSteps
+    private fun horizontalCommandsFromTotal(dx: Float): List<GestureCommand> {
+        val distanceAfterSlop = (abs(dx) - touchSlopPx).coerceAtLeast(0f)
+        if (distanceAfterSlop <= 0f) return emptyList()
+
+        horizontalDirection = if (dx >= 0f) 1 else -1
+        horizontalRemainderPx = distanceAfterSlop
+        reverseRemainderPx = 0f
+        return emitHorizontalSteps()
+    }
+
+    private fun horizontalCommandsForDelta(deltaX: Float): List<GestureCommand> {
+        val distance = abs(deltaX)
+        if (distance <= 0f) return emptyList()
+
+        if (horizontalDirection == 0) {
+            val distanceAfterSlop = (distance - touchSlopPx).coerceAtLeast(0f)
+            if (distanceAfterSlop <= 0f) return emptyList()
+            horizontalDirection = if (deltaX >= 0f) 1 else -1
+            horizontalRemainderPx = distanceAfterSlop
+            return emitHorizontalSteps()
         }
+
+        val direction = if (deltaX >= 0f) 1 else -1
+        if (direction != horizontalDirection) {
+            reverseRemainderPx += distance
+            if (reverseRemainderPx < reversalHysteresisPx) return emptyList()
+
+            horizontalDirection = direction
+            horizontalRemainderPx = reverseRemainderPx - reversalHysteresisPx
+            reverseRemainderPx = 0f
+        } else {
+            reverseRemainderPx = 0f
+            horizontalRemainderPx += distance
+        }
+        return emitHorizontalSteps()
+    }
+
+    private fun emitHorizontalSteps(): List<GestureCommand> {
+        val count = floor(horizontalRemainderPx / horizontalStepPx).toInt()
+        if (count <= 0) return emptyList()
+
+        horizontalRemainderPx -= count * horizontalStepPx
+        val command = if (horizontalDirection > 0) GestureCommand.MoveRight else GestureCommand.MoveLeft
+        return List(count) { command }
     }
 
     private fun verticalCommands(
@@ -132,12 +189,8 @@ class GestureInterpreter(
             holdSent = true
             return listOf(GestureCommand.Hold)
         }
-        if (dy <= 0f) return emptyList()
-        val deltaTime = (point.timeMs - previous.timeMs).coerceAtLeast(1L)
-        val deltaY = point.y - previous.y
-        if (deltaY > 0f) {
-            maxDownVelocity = max(maxDownVelocity, deltaY * 1_000f / deltaTime)
-        }
+        if (holdSent || dy <= 0f) return emptyList()
+        updateDownVelocity(previous, point)
         if (maxDownVelocity >= hardDropVelocityPxPerSecond) return emptyList()
         val targetSteps = floor(((dy - touchSlopPx) / softDropStepPx).coerceAtLeast(0f)).toInt()
         if (targetSteps <= softDropSteps) return emptyList()
@@ -148,11 +201,21 @@ class GestureInterpreter(
         return commands
     }
 
+    private fun updateDownVelocity(previous: GesturePoint, point: GesturePoint) {
+        val deltaTime = (point.timeMs - previous.timeMs).coerceAtLeast(1L)
+        val deltaY = point.y - previous.y
+        if (deltaY > 0f) {
+            maxDownVelocity = max(maxDownVelocity, deltaY * 1_000f / deltaTime)
+        }
+    }
+
     private fun reset() {
         down = null
         lastPoint = null
         mode = Mode.NONE
-        horizontalSteps = 0
+        horizontalDirection = 0
+        horizontalRemainderPx = 0f
+        reverseRemainderPx = 0f
         softDropSteps = 0
         holdSent = false
         maxDownVelocity = 0f

@@ -57,6 +57,70 @@ class GestureInterpreterTest {
     }
 
     @Test
+    fun `right to left reversal uses incremental distance and final up does not duplicate`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(100f, 200f, 0L))
+        assertEquals(4, interpreter.onMove(point(210f, 200f, 100L)).size)
+
+        val reverse = interpreter.onMove(point(90f, 200f, 200L))
+
+        assertEquals(5, reverse.size)
+        assertTrue(reverse.all { it == GestureCommand.MoveLeft })
+        assertTrue(interpreter.onUp(point(90f, 200f, 220L), viewWidth = 400f).isEmpty())
+    }
+
+    @Test
+    fun `left to right reversal emits the opposite incremental steps`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(300f, 200f, 0L))
+        assertEquals(4, interpreter.onMove(point(190f, 200f, 100L)).size)
+
+        val reverse = interpreter.onMove(point(310f, 200f, 200L))
+
+        assertEquals(5, reverse.size)
+        assertTrue(reverse.all { it == GestureCommand.MoveRight })
+    }
+
+    @Test
+    fun `small reversal oscillation stays inside hysteresis`() {
+        val interpreter = GestureInterpreter(
+            touchSlopPx = 10f,
+            horizontalStepPx = 20f,
+            reversalHysteresisPx = 6f,
+        )
+
+        interpreter.onDown(point(100f, 200f, 0L))
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(130f, 200f, 100L)))
+        assertTrue(interpreter.onMove(point(126f, 200f, 120L)).isEmpty())
+        assertTrue(interpreter.onMove(point(128f, 200f, 140L)).isEmpty())
+        assertTrue(interpreter.onMove(point(123f, 200f, 160L)).isEmpty())
+        assertTrue(interpreter.onMove(point(120f, 200f, 180L)).isEmpty())
+        assertEquals(listOf(GestureCommand.MoveLeft), interpreter.onMove(point(90f, 200f, 220L)))
+    }
+
+    @Test
+    fun `initial touch slop is consumed once before per-cell thresholds`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(100f, 200f, 0L))
+        assertTrue(interpreter.onMove(point(110f, 200f, 100L)).isEmpty())
+        assertTrue(interpreter.onMove(point(120f, 200f, 120L)).isEmpty())
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(140f, 200f, 140L)))
+    }
+
+    @Test
+    fun `action up consumes only the unseen horizontal segment`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(100f, 200f, 0L))
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(140f, 200f, 100L)))
+        assertEquals(2, interpreter.onUp(point(185f, 200f, 120L), viewWidth = 400f).size)
+        assertTrue(interpreter.onUp(point(185f, 200f, 130L), viewWidth = 400f).isEmpty())
+    }
+
+    @Test
     fun `tap on left half rotates counter clockwise`() {
         val interpreter = GestureInterpreter()
 
@@ -88,6 +152,15 @@ class GestureInterpreterTest {
         assertEquals(listOf(GestureCommand.SoftDrop), first)
         assertEquals(listOf(GestureCommand.SoftDrop), second)
         assertTrue(release.isEmpty())
+    }
+
+    @Test
+    fun `action up consumes the final vertical segment without duplicating soft drop`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(200f, 100f, 0L))
+        assertEquals(listOf(GestureCommand.SoftDrop), interpreter.onMove(point(200f, 150f, 500L)))
+        assertEquals(listOf(GestureCommand.SoftDrop), interpreter.onUp(point(200f, 180f, 800L), viewWidth = 400f))
     }
 
     @Test

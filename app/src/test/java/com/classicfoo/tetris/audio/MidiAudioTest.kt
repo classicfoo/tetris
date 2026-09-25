@@ -89,16 +89,21 @@ class MidiAudioTest {
 
     @Test
     fun `generated original songs are valid MIDI with playable notes`() {
-        assertEquals(listOf("Arcade A", "Arcade B", "Arcade C"), OriginalSongs.songs.map { it.name })
+        assertEquals(listOf("Stackline", "Copper Circuit", "Lockstep"), OriginalSongs.songs.map { it.name })
+        val bpms = listOf(150, 156, 162)
 
-        OriginalSongs.songs.forEach { song ->
+        OriginalSongs.songs.zip(bpms).forEach { (song, bpm) ->
             assertTrue(song.bytes.copyOfRange(0, 4).contentEquals("MThd".encodeToByteArray()))
 
             val parsed = MidiParser.parse(song.bytes)
             assertEquals(96, parsed.division)
+            assertEquals(TETRIS_LOOP_END_TICK.toLong(), parsed.endTick)
+            assertEquals(listOf(MidiTimeSignature(0L, 4, 4)), parsed.timeSignatures)
+            assertEquals(setOf(0, 1, 2, 9), parsed.notes.map { it.channel }.toSet())
+            assertEquals((60_000_000L / bpm) * TETRIS_LOOP_BEATS, MidiSequencer(parsed).durationMicros)
             assertTrue(parsed.notes.isNotEmpty())
-            assertTrue(parsed.endTick > 0)
             assertTrue(parsed.notes.all { it.pitch in 0..127 && it.velocity in 1..127 })
+            assertTrue(parsed.notes.all { it.endTick <= TETRIS_LOOP_END_TICK })
             assertTrue(parsed.tempos.any { it.microsecondsPerQuarter > 0 })
         }
     }
@@ -106,12 +111,42 @@ class MidiAudioTest {
     @Test
     fun `synth renders non-empty PCM for generated original songs`() {
         OriginalSongs.songs.forEach { song ->
-            val samples = ChiptuneSynth.render(song, maxSeconds = 2)
+            val rendered = ChiptuneSynth.renderSong(song)
+            val samples = rendered.samples
 
             assertTrue(samples.isNotEmpty())
             assertTrue(samples.any { it.toInt() != 0 })
             assertTrue(samples.all { it.toInt() in Short.MIN_VALUE..Short.MAX_VALUE })
+            assertEquals(samples.size, rendered.loopEndFrame)
+            assertEquals(0, samples.first().toInt())
+            assertEquals(0, samples.last().toInt())
         }
+    }
+
+    @Test
+    fun `PCM cursor wraps and pauses without advancing`() {
+        val rendered = RenderedPcm(
+            samples = shortArrayOf(10, 20, 30, 40, 50),
+            loopStartFrame = 1,
+            loopEndFrame = 4,
+            durationMicros = 3,
+            sampleRate = 1,
+        )
+        val cursor = PcmCursor(rendered)
+        val first = ShortArray(4)
+        assertEquals(4, cursor.read(first))
+        assertEquals(shortArrayOf(20, 30, 40, 20).toList(), first.toList())
+
+        cursor.pause()
+        assertEquals(0, cursor.read(ShortArray(2)))
+        assertEquals(2, cursor.positionFrame())
+
+        cursor.resume()
+        val second = ShortArray(2)
+        cursor.read(second)
+        assertEquals(shortArrayOf(30, 40).toList(), second.toList())
+        cursor.release()
+        assertEquals(0, cursor.read(ShortArray(1)))
     }
 
     @Test

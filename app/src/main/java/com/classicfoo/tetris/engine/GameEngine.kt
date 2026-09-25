@@ -11,6 +11,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     private var lockElapsedMs = 0L
     private var lockResets = 0
     private var lastActionWasRotation = false
+    private var clearSequenceCounter = 0L
 
     var state: GameState = createInitialState()
         private set
@@ -54,6 +55,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             backToBack = false,
             status = GameStatus.RUNNING,
             ghostY = current.y,
+            clearSequence = clearSequenceCounter,
         )
     }
 
@@ -184,7 +186,10 @@ class GameEngine(seed: Long = System.nanoTime()) {
     private fun lockCurrent() {
         val tSpin = detectTSpin()
         val locked = BoardRules.lock(state.board, state.current)
-        val (clearedBoard, linesCleared) = BoardRules.clearLines(locked)
+        val clearResult = BoardRules.clearLinesWithRows(locked)
+        val clearedBoard = clearResult.board
+        val linesCleared = clearResult.count
+        if (linesCleared > 0) clearSequenceCounter++
         val perfectClear = linesCleared > 0 && BoardRules.isEmpty(clearedBoard)
         val difficult = (tSpin != TSpinKind.NONE && linesCleared > 0) || linesCleared == 4
         val delta = Scoring.scoreDelta(
@@ -220,6 +225,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             combo = combo,
             backToBack = backToBack,
             status = if (gameOver) GameStatus.GAME_OVER else GameStatus.RUNNING,
+            clearSequence = clearSequenceCounter,
             lastEvent = when {
                 gameOver -> GameEvent.GAME_OVER
                 perfectClear -> GameEvent.PERFECT_CLEAR
@@ -228,6 +234,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
                 else -> GameEvent.LAND
             },
             lastLines = linesCleared,
+            lastClearedRows = clearResult.clearedRows,
             lastScoreDelta = delta,
             lastTSpin = tSpin,
             perfectClear = perfectClear,

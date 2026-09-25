@@ -14,7 +14,6 @@ import android.view.View
 import com.classicfoo.tetris.engine.ActivePiece
 import com.classicfoo.tetris.engine.BOARD_HEIGHT
 import com.classicfoo.tetris.engine.BOARD_WIDTH
-import com.classicfoo.tetris.engine.BoardRules
 import com.classicfoo.tetris.engine.GameAction
 import com.classicfoo.tetris.engine.GameEngine
 import com.classicfoo.tetris.engine.GameEvent
@@ -25,9 +24,9 @@ import com.classicfoo.tetris.engine.Rotation
 import com.classicfoo.tetris.engine.Tetromino
 import com.classicfoo.tetris.settings.GameSettings
 import com.classicfoo.tetris.settings.ThemeOption
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class GameSurfaceView @JvmOverloads constructor(
     context: Context,
@@ -43,7 +42,17 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     private val blockPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val pixelPaint = Paint().apply {
+        isAntiAlias = false
+        isDither = false
+        style = Paint.Style.FILL
+    }
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val pixelGridPaint = Paint().apply {
+        isAntiAlias = false
+        isDither = false
+        style = Paint.Style.FILL
+    }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = android.graphics.Typeface.create("sans", android.graphics.Typeface.BOLD)
         isSubpixelText = true
@@ -52,9 +61,9 @@ class GameSurfaceView @JvmOverloads constructor(
     private var running = false
     private var lastFrameAt = 0L
     private var lastFeedbackEvent = GameEvent.NONE
-    private var flashUntil = 0L
     private var stateListener: ((GameState) -> Unit)? = null
     private var gestureInterpreter = GestureInterpreter()
+    private val clearFlashController = ClearFlashController()
 
     private val frame = object : Runnable {
         override fun run() {
@@ -102,7 +111,6 @@ class GameSurfaceView @JvmOverloads constructor(
         } else if (after.lastEvent == GameEvent.NONE) {
             lastFeedbackEvent = GameEvent.NONE
         }
-        if (after.lastLines > 0) flashUntil = SystemClock.uptimeMillis() + 220L
         stateListener?.invoke(after)
         invalidate()
     }
@@ -119,6 +127,7 @@ class GameSurfaceView @JvmOverloads constructor(
         running = false
         removeCallbacks(frame)
         lastFrameAt = 0L
+        clearFlashController.cancel(engine.state.clearSequence)
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
@@ -131,21 +140,18 @@ class GameSurfaceView @JvmOverloads constructor(
         val state = engine.state
         val palette = Palette.forTheme(settings.theme)
         val layout = calculateLayout()
+        val now = SystemClock.uptimeMillis()
+        val clearFlash = clearFlashController.observe(state, now)
         canvas.drawColor(palette.background)
 
         drawHud(canvas, state, palette, layout)
-        drawBoard(canvas, state, palette, layout)
+        drawBoard(canvas, state, palette, layout, clearFlash)
 
         if (state.status == GameStatus.PAUSED || state.status == GameStatus.GAME_OVER) {
             drawOverlay(canvas, palette)
         }
 
-        if (flashUntil > SystemClock.uptimeMillis()) {
-            blockPaint.style = Paint.Style.FILL
-            blockPaint.color = palette.flash
-            blockPaint.alpha = 86
-            canvas.drawRect(layout.boardLeft, layout.boardTop, layout.boardRight, layout.boardBottom, blockPaint)
-            blockPaint.alpha = 255
+        if (clearFlash.active) {
             postInvalidateOnAnimation()
         }
     }
@@ -248,32 +254,60 @@ class GameSurfaceView @JvmOverloads constructor(
         canvas.drawText(label, centerX, baseline, textPaint)
     }
 
-    private fun drawBoard(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
-        blockPaint.style = Paint.Style.FILL
-        blockPaint.color = palette.board
-        canvas.drawRoundRect(
-            RectF(layout.boardLeft - dp(4f), layout.boardTop - dp(4f), layout.boardRight + dp(4f), layout.boardBottom + dp(4f)),
-            dp(8f),
-            dp(8f),
-            blockPaint,
+    private fun drawBoard(
+        canvas: Canvas,
+        state: GameState,
+        palette: Palette,
+        layout: BoardLayout,
+        clearFlash: ClearFlashFrame,
+    ) {
+        val outer = RectF(
+            snap(layout.boardLeft - dp(4f)),
+            snap(layout.boardTop - dp(4f)),
+            snap(layout.boardRight + dp(4f)),
+            snap(layout.boardBottom + dp(4f)),
         )
+        if (palette.pixelStyle) {
+            pixelPaint.style = Paint.Style.FILL
+            pixelPaint.alpha = 255
+            pixelPaint.color = palette.pixelOutline
+            canvas.drawRect(outer, pixelPaint)
+            pixelPaint.color = palette.board
+            canvas.drawRect(
+                snap(layout.boardLeft),
+                snap(layout.boardTop),
+                snap(layout.boardRight),
+                snap(layout.boardBottom),
+                pixelPaint,
+            )
+        } else {
+            blockPaint.style = Paint.Style.FILL
+            blockPaint.color = palette.board
+            canvas.drawRoundRect(outer, dp(8f), dp(8f), blockPaint)
+        }
 
         if (settings.showGrid) {
-            gridPaint.color = palette.grid
-            gridPaint.alpha = if (palette.isGameBoy) 135 else 175
-            gridPaint.strokeWidth = max(1f, dp(1f))
-            for (x in 0..BOARD_WIDTH) {
-                canvas.drawLine(layout.boardLeft + x * layout.cellSize, layout.boardTop, layout.boardLeft + x * layout.cellSize, layout.boardBottom, gridPaint)
+            if (palette.pixelStyle) {
+                drawPixelGrid(canvas, palette, layout)
+            } else {
+                gridPaint.color = palette.grid
+                gridPaint.alpha = palette.gridAlpha
+                gridPaint.strokeWidth = max(1f, dp(1f))
+                for (x in 0..BOARD_WIDTH) {
+                    canvas.drawLine(layout.boardLeft + x * layout.cellSize, layout.boardTop, layout.boardLeft + x * layout.cellSize, layout.boardBottom, gridPaint)
+                }
+                for (y in 0..BOARD_HEIGHT) {
+                    canvas.drawLine(layout.boardLeft, layout.boardTop + y * layout.cellSize, layout.boardRight, layout.boardTop + y * layout.cellSize, gridPaint)
+                }
+                gridPaint.alpha = 255
             }
-            for (y in 0..BOARD_HEIGHT) {
-                canvas.drawLine(layout.boardLeft, layout.boardTop + y * layout.cellSize, layout.boardRight, layout.boardTop + y * layout.cellSize, gridPaint)
-            }
-            gridPaint.alpha = 255
         }
+
+        drawClearFlash(canvas, layout, palette, clearFlash)
 
         state.board.forEachIndexed { y, row ->
             row.forEachIndexed { x, type ->
-                if (type != null) drawCell(canvas, palette.color(type), layout.boardLeft + x * layout.cellSize, layout.boardTop + y * layout.cellSize, layout.cellSize, palette)
+                if (type != null) drawCell(canvas, type, layout.boardLeft + x * layout.cellSize, layout.boardTop + y * layout.cellSize, layout.cellSize, palette)
             }
         }
         if (settings.showGhost && state.status == GameStatus.RUNNING) {
@@ -282,12 +316,49 @@ class GameSurfaceView @JvmOverloads constructor(
         drawPiece(canvas, state.current, palette, layout, ghost = false)
     }
 
+    private fun drawClearFlash(
+        canvas: Canvas,
+        layout: BoardLayout,
+        palette: Palette,
+        flash: ClearFlashFrame,
+    ) {
+        if (!flash.active) return
+        pixelPaint.style = Paint.Style.FILL
+        pixelPaint.color = palette.flash
+        pixelPaint.alpha = flash.alpha
+        flash.rows.forEach { row ->
+            if (row !in 0 until BOARD_HEIGHT) return@forEach
+            val top = snap(layout.boardTop + row * layout.cellSize)
+            val bottom = snap(layout.boardTop + (row + 1) * layout.cellSize)
+            canvas.drawRect(snap(layout.boardLeft), top, snap(layout.boardRight), bottom, pixelPaint)
+        }
+        pixelPaint.alpha = 255
+    }
+
+    private fun drawPixelGrid(canvas: Canvas, palette: Palette, layout: BoardLayout) {
+        pixelGridPaint.color = palette.grid
+        pixelGridPaint.alpha = palette.gridAlpha
+        val top = snap(layout.boardTop)
+        val bottom = snap(layout.boardBottom)
+        val left = snap(layout.boardLeft)
+        val right = snap(layout.boardRight)
+        for (x in 1 until BOARD_WIDTH) {
+            val px = snap(layout.boardLeft + x * layout.cellSize)
+            canvas.drawRect(px, top, px + 1f, bottom, pixelGridPaint)
+        }
+        for (y in 1 until BOARD_HEIGHT) {
+            val py = snap(layout.boardTop + y * layout.cellSize)
+            canvas.drawRect(left, py, right, py + 1f, pixelGridPaint)
+        }
+        pixelGridPaint.alpha = 255
+    }
+
     private fun drawPiece(canvas: Canvas, piece: ActivePiece, palette: Palette, layout: BoardLayout, ghost: Boolean) {
         PieceDefinitions.cells(piece.type, piece.rotation).forEach { block ->
             val x = layout.boardLeft + (piece.x + block.x) * layout.cellSize
             val y = layout.boardTop + (piece.y + block.y) * layout.cellSize
             if (y + layout.cellSize >= layout.boardTop && y <= layout.boardBottom) {
-                drawCell(canvas, palette.color(piece.type), x, y, layout.cellSize, palette, ghost)
+                drawCell(canvas, piece.type, x, y, layout.cellSize, palette, ghost)
             }
         }
     }
@@ -302,19 +373,24 @@ class GameSurfaceView @JvmOverloads constructor(
         val x = left + (width - pieceWidth) / 2f
         val y = top + max(0f, (height - pieceHeight) / 2f)
         cells.forEach { block ->
-            drawCell(canvas, palette.color(type), x + (block.x - minX) * cell, y + (block.y - minY) * cell, cell, palette)
+            drawCell(canvas, type, x + (block.x - minX) * cell, y + (block.y - minY) * cell, cell, palette)
         }
     }
 
     private fun drawCell(
         canvas: Canvas,
-        color: Int,
+        type: Tetromino,
         x: Float,
         y: Float,
         size: Float,
         palette: Palette,
         ghost: Boolean = false,
     ) {
+        val color = palette.color(type)
+        if (palette.pixelStyle) {
+            drawPixelCell(canvas, palette, palette.ramp(type), x, y, size, ghost)
+            return
+        }
         val inset = max(dp(1f), size * 0.055f)
         val rect = RectF(x + inset, y + inset, x + size - inset, y + size - inset)
         blockPaint.color = color
@@ -329,31 +405,80 @@ class GameSurfaceView @JvmOverloads constructor(
         }
 
         blockPaint.style = Paint.Style.FILL
-        if (palette.bevel) {
-            canvas.drawRect(rect, blockPaint)
-            val bevel = max(dp(1f), size * 0.12f)
-            blockPaint.color = palette.highlight
-            canvas.drawRect(rect.left, rect.top, rect.right, rect.top + bevel, blockPaint)
-            canvas.drawRect(rect.left, rect.top, rect.left + bevel, rect.bottom, blockPaint)
-            blockPaint.color = palette.shadow
-            canvas.drawRect(rect.left, rect.bottom - bevel, rect.right, rect.bottom, blockPaint)
-            canvas.drawRect(rect.right - bevel, rect.top, rect.right, rect.bottom, blockPaint)
-        } else {
-            val radius = if (palette.isGameBoy) 0f else size * 0.12f
-            canvas.drawRoundRect(rect, radius, radius, blockPaint)
-            if (!palette.isGameBoy) {
-                blockPaint.color = Color.WHITE
-                blockPaint.alpha = 38
-                canvas.drawRoundRect(
-                    RectF(rect.left + size * 0.16f, rect.top + size * 0.12f, rect.right - size * 0.2f, rect.top + size * 0.24f),
-                    size * 0.05f,
-                    size * 0.05f,
-                    blockPaint,
-                )
-            }
-        }
+        val radius = size * 0.12f
+        canvas.drawRoundRect(rect, radius, radius, blockPaint)
+        blockPaint.color = Color.WHITE
+        blockPaint.alpha = 38
+        canvas.drawRoundRect(
+            RectF(rect.left + size * 0.16f, rect.top + size * 0.12f, rect.right - size * 0.2f, rect.top + size * 0.24f),
+            size * 0.05f,
+            size * 0.05f,
+            blockPaint,
+        )
         blockPaint.alpha = 255
     }
+
+    private fun drawPixelCell(
+        canvas: Canvas,
+        palette: Palette,
+        ramp: OpaqueColorRamp,
+        x: Float,
+        y: Float,
+        size: Float,
+        ghost: Boolean,
+    ) {
+        val parts = TengenBevelGeometry.fromFloat(x, y, x + size, y + size)
+        pixelPaint.style = if (ghost) Paint.Style.STROKE else Paint.Style.FILL
+        pixelPaint.strokeWidth = 1f
+        pixelPaint.alpha = if (ghost) palette.ghostAlpha else 255
+        if (ghost) {
+            pixelPaint.color = palette.ghostColor
+            val face = parts.face
+            canvas.drawRect(
+                face.left + 0.5f,
+                face.top + 0.5f,
+                face.right - 0.5f,
+                face.bottom - 0.5f,
+                pixelPaint,
+            )
+        } else {
+            pixelPaint.color = palette.boardFrame
+            canvas.drawRect(parts.cell.toRectF(), pixelPaint)
+            pixelPaint.color = ramp.base
+            canvas.drawRect(parts.face.toRectF(), pixelPaint)
+            if (palette.bevel && !parts.isFlat) {
+                drawPolygon(canvas, parts.top, ramp.highlight)
+                drawPolygon(canvas, parts.left, ramp.highlight)
+                drawPolygon(canvas, parts.right, ramp.shadow)
+                drawPolygon(canvas, parts.bottom, ramp.shadow)
+            }
+        }
+        pixelPaint.alpha = 255
+        pixelPaint.style = Paint.Style.FILL
+    }
+
+    private fun drawPolygon(canvas: Canvas, polygon: PixelPolygon?, color: Int) {
+        if (polygon == null) return
+        val path = Path().apply {
+            moveTo(polygon.points.first().x.toFloat(), polygon.points.first().y.toFloat())
+            polygon.points.drop(1).forEach { point ->
+                lineTo(point.x.toFloat(), point.y.toFloat())
+            }
+            close()
+        }
+        pixelPaint.color = color
+        pixelPaint.alpha = 255
+        canvas.drawPath(path, pixelPaint)
+    }
+
+    private fun snap(value: Float): Float = value.roundToInt().toFloat()
+
+    private fun PixelRect.toRectF(): RectF = RectF(
+        left.toFloat(),
+        top.toFloat(),
+        right.toFloat(),
+        bottom.toFloat(),
+    )
 
     private fun drawOverlay(canvas: Canvas, palette: Palette) {
         blockPaint.style = Paint.Style.FILL
@@ -471,19 +596,26 @@ class GameSurfaceView @JvmOverloads constructor(
         val background: Int,
         val panel: Int,
         val board: Int,
+        val boardFrame: Int,
+        val pixelOutline: Int,
         val grid: Int,
+        val gridAlpha: Int,
         val text: Int,
         val mutedText: Int,
         val accent: Int,
         val flash: Int,
         val overlay: Int,
-        val highlight: Int,
-        val shadow: Int,
+        val ghostColor: Int,
+        val ghostAlpha: Int,
         val bevel: Boolean,
         val isGameBoy: Boolean,
-        val colors: Map<Tetromino, Int>,
+        val colors: Map<Tetromino, OpaqueColorRamp>,
     ) {
-        fun color(type: Tetromino): Int = colors.getValue(type)
+        val pixelStyle: Boolean get() = bevel || isGameBoy
+
+        fun ramp(type: Tetromino): OpaqueColorRamp = colors.getValue(type)
+
+        fun color(type: Tetromino): Int = ramp(type).base
 
         companion object {
             fun forTheme(theme: ThemeOption): Palette = when (theme) {
@@ -491,72 +623,73 @@ class GameSurfaceView @JvmOverloads constructor(
                     background = Color.rgb(12, 15, 23),
                     panel = Color.rgb(27, 32, 48),
                     board = Color.rgb(19, 23, 34),
+                    boardFrame = Color.rgb(27, 32, 48),
+                    pixelOutline = Color.rgb(12, 15, 23),
                     grid = Color.rgb(72, 82, 108),
+                    gridAlpha = 175,
                     text = Color.WHITE,
                     mutedText = Color.rgb(173, 182, 204),
                     accent = Color.rgb(112, 190, 255),
                     flash = Color.WHITE,
                     overlay = Color.rgb(5, 7, 12),
-                    highlight = Color.WHITE,
-                    shadow = Color.BLACK,
+                    ghostColor = Color.WHITE,
+                    ghostAlpha = 72,
                     bevel = false,
                     isGameBoy = false,
                     colors = mapOf(
-                        Tetromino.I to Color.rgb(0, 188, 212),
-                        Tetromino.O to Color.rgb(255, 202, 40),
-                        Tetromino.T to Color.rgb(171, 71, 188),
-                        Tetromino.J to Color.rgb(63, 81, 181),
-                        Tetromino.L to Color.rgb(255, 112, 67),
-                        Tetromino.S to Color.rgb(76, 175, 80),
-                        Tetromino.Z to Color.rgb(239, 83, 80),
+                        Tetromino.I to OpaqueColorRamp(Color.rgb(0, 188, 212), Color.WHITE, Color.BLACK),
+                        Tetromino.O to OpaqueColorRamp(Color.rgb(255, 202, 40), Color.WHITE, Color.BLACK),
+                        Tetromino.T to OpaqueColorRamp(Color.rgb(171, 71, 188), Color.WHITE, Color.BLACK),
+                        Tetromino.J to OpaqueColorRamp(Color.rgb(63, 81, 181), Color.WHITE, Color.BLACK),
+                        Tetromino.L to OpaqueColorRamp(Color.rgb(255, 112, 67), Color.WHITE, Color.BLACK),
+                        Tetromino.S to OpaqueColorRamp(Color.rgb(76, 175, 80), Color.WHITE, Color.BLACK),
+                        Tetromino.Z to OpaqueColorRamp(Color.rgb(239, 83, 80), Color.WHITE, Color.BLACK),
                     ),
                 )
                 ThemeOption.TENGEN_BEVEL -> Palette(
-                    background = Color.rgb(10, 16, 34),
-                    panel = Color.rgb(27, 38, 68),
-                    board = Color.rgb(8, 12, 26),
-                    grid = Color.rgb(41, 58, 94),
+                    background = Color.rgb(6, 17, 38),
+                    panel = Color.rgb(18, 38, 74),
+                    board = Color.rgb(11, 23, 49),
+                    boardFrame = Color.rgb(39, 79, 150),
+                    pixelOutline = Color.rgb(5, 10, 23),
+                    grid = Color.rgb(37, 65, 111),
+                    gridAlpha = 64,
                     text = Color.rgb(255, 245, 204),
                     mutedText = Color.rgb(177, 190, 220),
                     accent = Color.rgb(255, 206, 82),
                     flash = Color.rgb(255, 240, 158),
                     overlay = Color.rgb(4, 8, 19),
-                    highlight = Color.argb(170, 255, 255, 255),
-                    shadow = Color.argb(190, 0, 0, 0),
+                    ghostColor = Color.rgb(255, 245, 204),
+                    ghostAlpha = 128,
                     bevel = true,
                     isGameBoy = false,
-                    colors = mapOf(
-                        Tetromino.I to Color.rgb(38, 190, 210),
-                        Tetromino.O to Color.rgb(247, 193, 43),
-                        Tetromino.T to Color.rgb(157, 78, 178),
-                        Tetromino.J to Color.rgb(44, 92, 184),
-                        Tetromino.L to Color.rgb(222, 94, 47),
-                        Tetromino.S to Color.rgb(48, 156, 74),
-                        Tetromino.Z to Color.rgb(208, 54, 55),
-                    ),
+                    colors = TengenBevelPalette.ramps,
                 )
                 ThemeOption.GAME_BOY -> Palette(
                     background = Color.rgb(155, 188, 15),
                     panel = Color.rgb(139, 172, 15),
                     board = Color.rgb(35, 75, 35),
+                    boardFrame = Color.rgb(15, 56, 15),
+                    pixelOutline = Color.rgb(15, 56, 15),
                     grid = Color.rgb(87, 126, 51),
+                    gridAlpha = 85,
                     text = Color.rgb(15, 56, 15),
                     mutedText = Color.rgb(48, 98, 48),
                     accent = Color.rgb(15, 56, 15),
                     flash = Color.rgb(155, 188, 15),
                     overlay = Color.rgb(155, 188, 15),
-                    highlight = Color.rgb(155, 188, 15),
-                    shadow = Color.rgb(15, 56, 15),
+                    ghostColor = Color.rgb(155, 188, 15),
+                    ghostAlpha = 170,
                     bevel = false,
                     isGameBoy = true,
                     colors = mapOf(
-                        Tetromino.I to Color.rgb(15, 56, 15),
-                        Tetromino.O to Color.rgb(155, 188, 15),
-                        Tetromino.T to Color.rgb(87, 126, 51),
-                        Tetromino.J to Color.rgb(15, 56, 15),
-                        Tetromino.L to Color.rgb(139, 172, 15),
-                        Tetromino.S to Color.rgb(87, 126, 51),
-                        Tetromino.Z to Color.rgb(15, 56, 15),
+                        Tetromino.I to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
+                        Tetromino.O to OpaqueColorRamp(Color.rgb(155, 188, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
+                        Tetromino.T to OpaqueColorRamp(Color.rgb(87, 126, 51), Color.rgb(155, 188, 15), Color.rgb(15, 56, 15)),
+                        Tetromino.J to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
+                        Tetromino.L to OpaqueColorRamp(Color.rgb(139, 172, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
+                        Tetromino.S to OpaqueColorRamp(Color.rgb(87, 126, 51), Color.rgb(155, 188, 15), Color.rgb(15, 56, 15)),
+                        Tetromino.Z to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
                     ),
                 )
             }

@@ -66,6 +66,8 @@ data class GameState(
     val ghostY: Int,
     val lastEvent: GameEvent = GameEvent.NONE,
     val lastLines: Int = 0,
+    val clearSequence: Long = 0L,
+    val lastClearedRows: List<Int> = emptyList(),
     val lastScoreDelta: Long = 0,
     val lastTSpin: TSpinKind = TSpinKind.NONE,
     val perfectClear: Boolean = false,
