@@ -46,7 +46,7 @@ class SettingsStore(context: Context) {
 
     fun save(settings: GameSettings) {
         preferences.edit {
-            .putString(KEY_THEME, settings.theme.name)
+            putString(KEY_THEME, settings.theme.name)
             .putBoolean(KEY_GRID, settings.showGrid)
             .putBoolean(KEY_GHOST, settings.showGhost)
             .putBoolean(KEY_SOUND, settings.soundEnabled)
