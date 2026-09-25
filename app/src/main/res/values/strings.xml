@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Tetris</string>
     <string name="pause">Pause</string>
     <string name="settings">Settings</string>
@@ -10,7 +10,6 @@
     <string name="move_left">Move left</string>
     <string name="soft_drop">Soft drop</string>
     <string name="move_right">Move right</string>
-    <string name="restart">Restart</string>
     <string name="resume">Resume</string>
     <string name="new_game">New game</string>
     <string name="game_over">Game over</string>
@@ -19,20 +18,13 @@
     <string name="preview_count_value">%1$s: %2$d</string>
     <string name="repeat_delay_value">%1$s: %2$d ms</string>
     <string name="repeat_rate_value">%1$s: %2$d ms</string>
-    <string name="score_entry_format">%1$d. %2$d points · %3$d lines · level %4$d</string>
-    <string name="score_format">Score %1$d</string>
-    <string name="lines_format">Lines %1$d</string>
-    <string name="level_format">Level %1$d</string>
-    <string name="next_label">Next</string>
+    <string name="score_entry_format" tools:ignore="PluralsCandidate">%1$d. %2$d points · %3$d lines · level %4$d</string>
     <string name="high_scores">High scores</string>
     <string name="no_scores">No scores yet</string>
     <string name="theme">Theme</string>
     <string name="classic_theme">Classic</string>
     <string name="neon_theme">Neon</string>
     <string name="mono_theme">Monochrome</string>
-    <string name="appearance">Appearance</string>
-    <string name="controls">Controls</string>
-    <string name="feedback">Feedback</string>
     <string name="show_grid">Show grid</string>
     <string name="show_ghost">Show ghost piece</string>
     <string name="sound">Sound effects</string>
@@ -41,6 +33,4 @@
     <string name="preview_count">Preview count</string>
     <string name="repeat_delay">Repeat delay</string>
     <string name="repeat_rate">Repeat rate</string>
-    <string name="milliseconds_format">%1$d ms</string>
-    <string name="about">Tetris is an original, offline game implementation. No network access or analytics are used.</string>
 </resources>

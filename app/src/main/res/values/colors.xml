@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="tetris_background">#10131C</color>
-    <color name="tetris_surface">#1A2030</color>
     <color name="tetris_primary">#7C4DFF</color>
     <color name="tetris_on_primary">#FFFFFF</color>
     <color name="tetris_secondary">#00BCD4</color>
-    <color name="tetris_on_surface">#F5F7FF</color>
 </resources>
