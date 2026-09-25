@@ -1,17 +1,24 @@
 package com.classicfoo.tetris
 
+import android.app.Dialog
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.MotionEvent
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.classicfoo.tetris.engine.GameAction
 import com.classicfoo.tetris.engine.GameState
 import com.classicfoo.tetris.engine.GameStatus
@@ -22,19 +29,21 @@ import com.classicfoo.tetris.settings.SettingsStore
 import com.classicfoo.tetris.settings.ThemeOption
 import com.classicfoo.tetris.ui.Feedback
 import com.classicfoo.tetris.ui.GameSurfaceView
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.switchmaterial.SwitchMaterial
 
 class MainActivity : ComponentActivity() {
     private lateinit var gameView: GameSurfaceView
-    private lateinit var controls: LinearLayout
-    private lateinit var pauseButton: MaterialButton
+    private lateinit var rootView: FrameLayout
+    private lateinit var pauseButton: ImageButton
+    private lateinit var settingsButton: ImageButton
     private lateinit var settingsStore: SettingsStore
     private lateinit var scoreStore: ScoreStore
     private lateinit var feedback: Feedback
     private var settings = GameSettings()
     private var gameOverShown = false
+    private var menuDialog: Dialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,131 +53,141 @@ class MainActivity : ComponentActivity() {
         scoreStore = ScoreStore(this)
         settings = settingsStore.load()
         feedback = Feedback(this)
+        feedback.updateSettings(settings)
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(android.graphics.Color.rgb(16, 19, 28))
+        rootView = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(16, 19, 28))
         }
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(view.paddingLeft, bars.top, view.paddingRight, bars.bottom)
             insets
         }
 
-        val gameContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-        }
+        gameView = GameSurfaceView(
+            this,
+            engine = com.classicfoo.tetris.engine.GameEngine(),
+            initialSettings = settings,
+            feedback = feedback,
+        )
+        gameView.setStateListener(::handleState)
+        rootView.addView(gameView, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
 
-        val toolbar = LinearLayout(this).apply {
+        val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(8, 4, 8, 4)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 2.dp(), 8.dp(), 0)
         }
-        pauseButton = actionButton(getString(com.classicfoo.tetris.R.string.pause), getString(com.classicfoo.tetris.R.string.pause)) {
-            if (gameView.state().status == GameStatus.PAUSED) gameView.dispatch(GameAction.Resume)
-            else gameView.dispatch(GameAction.Pause)
-            updatePauseLabel()
+        pauseButton = iconButton(R.drawable.ic_pause, R.string.pause) {
+            when (gameView.state().status) {
+                GameStatus.RUNNING -> {
+                    gameView.dispatch(GameAction.Pause)
+                    showMenu(GameStatus.PAUSED)
+                }
+                GameStatus.PAUSED -> {
+                    menuDialog?.dismiss()
+                    gameView.dispatch(GameAction.Resume)
+                }
+                GameStatus.GAME_OVER -> showMenu(GameStatus.GAME_OVER)
+            }
         }
-        toolbar.addView(pauseButton, LinearLayout.LayoutParams(0, 52.dp(), 1f))
-        val settingsButton = actionButton(getString(com.classicfoo.tetris.R.string.settings), getString(com.classicfoo.tetris.R.string.settings)) {
-            showSettings()
-        }
-        toolbar.addView(settingsButton, LinearLayout.LayoutParams(0, 52.dp(), 1f))
-        gameContainer.addView(toolbar)
+        actions.addView(pauseButton)
+        settingsButton = iconButton(R.drawable.ic_settings, R.string.settings) { showSettings() }
+        actions.addView(settingsButton)
+        rootView.addView(actions, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END,
+        ))
 
-        gameView = GameSurfaceView(this, engine = com.classicfoo.tetris.engine.GameEngine(), initialSettings = settings, feedback = feedback)
-        gameView.setStateListener { state -> handleState(state) }
-        gameContainer.addView(gameView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(gameContainer)
-
-        controls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(8, 4, 8, 4)
-        }
-        root.addView(controls, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        rebuildControls()
-
-        setContentView(root)
+        setContentView(rootView)
+        updateChromeColors()
+        ViewCompat.requestApplyInsets(rootView)
         gameView.startTicker()
+        feedback.startMusic()
     }
 
     override fun onResume() {
         super.onResume()
-        if (::gameView.isInitialized) gameView.startTicker()
+        if (::gameView.isInitialized) {
+            gameView.startTicker()
+            if (gameView.state().status == GameStatus.RUNNING) feedback.resumeMusic()
+        }
     }
 
     override fun onPause() {
         if (::gameView.isInitialized) gameView.stopTicker()
+        if (::feedback.isInitialized) feedback.pauseMusic()
         super.onPause()
     }
 
     override fun onDestroy() {
+        menuDialog?.dismiss()
         if (::gameView.isInitialized) gameView.stopTicker()
         if (::feedback.isInitialized) feedback.release()
         super.onDestroy()
     }
 
     private fun handleState(state: GameState) {
-        updatePauseLabel()
+        updatePauseIcon(state.status)
         if (state.status == GameStatus.GAME_OVER && !gameOverShown) {
             gameOverShown = true
             scoreStore.record(ScoreEntry(state.score, state.lines, state.level))
-            Handler(Looper.getMainLooper()).post { showGameOver(state) }
+            Handler(Looper.getMainLooper()).post { showMenu(GameStatus.GAME_OVER, state) }
         }
         if (state.status != GameStatus.GAME_OVER) gameOverShown = false
     }
 
-    private fun rebuildControls() {
-        controls.removeAllViews()
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val hold = actionButton(getString(R.string.hold), getString(R.string.hold)) { gameView.dispatch(GameAction.Hold) }
-        val rotateLeft = actionButton("↺", getString(R.string.rotate_left)) { gameView.dispatch(GameAction.RotateCounterClockwise) }
-        val rotateRight = actionButton("↻", getString(R.string.rotate_right)) { gameView.dispatch(GameAction.RotateClockwise) }
-        val drop = actionButton(getString(R.string.drop), getString(R.string.drop)) { gameView.dispatch(GameAction.HardDrop) }
-        listOf(hold, rotateLeft, rotateRight, drop).forEach { top.addView(it, weightedButtonParams()) }
-
-        val left = repeatButton("←", R.string.move_left, GameAction.MoveLeft)
-        val down = repeatButton("↓", R.string.soft_drop, GameAction.SoftDrop)
-        val right = repeatButton("→", R.string.move_right, GameAction.MoveRight)
-        val newGame = actionButton(getString(R.string.new_game), getString(R.string.new_game)) {
-            gameView.dispatch(GameAction.Restart)
-            gameOverShown = false
+    private fun showMenu(status: GameStatus, state: GameState = gameView.state()) {
+        if (isFinishing || menuDialog?.isShowing == true) return
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(8.dp(), 0, 8.dp(), 0)
         }
-        val movement = if (settings.leftHanded) listOf(right, down, left, newGame) else listOf(left, down, right, newGame)
-        movement.forEach { bottom.addView(it, weightedButtonParams()) }
-
-        controls.addView(top)
-        controls.addView(bottom)
-    }
-
-    private fun repeatButton(label: String, description: Int, action: GameAction): MaterialButton {
-        val button = actionButton(label, getString(description)) {}
-        button.setOnTouchListener(RepeatTouchListener(
-            delay = { settings.repeatDelayMs.toLong() },
-            rate = { settings.repeatRateMs.toLong() },
-            action = { gameView.dispatch(action) },
-        ))
-        return button
-    }
-
-    private fun actionButton(label: String, description: String, action: () -> Unit): MaterialButton {
-        return MaterialButton(this).apply {
-            text = label
-            contentDescription = description
-            isAllCaps = false
-            minHeight = 48.dp()
-            setOnClickListener { action() }
+        fun addAction(label: String, action: () -> Unit) {
+            content.addView(actionButton(label, label, action), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { setMargins(0, 4.dp(), 0, 4.dp()) })
         }
+
+        if (status == GameStatus.PAUSED) {
+            addAction(getString(R.string.resume)) {
+                menuDialog?.dismiss()
+                gameView.dispatch(GameAction.Resume)
+            }
+        }
+        addAction(getString(R.string.new_game)) { startNewGame() }
+        addAction(getString(R.string.settings)) {
+            menuDialog?.dismiss()
+            showSettings()
+        }
+        addAction(getString(R.string.high_scores)) {
+            menuDialog?.dismiss()
+            showScores()
+        }
+
+        val title = if (status == GameStatus.PAUSED) getString(R.string.paused) else getString(R.string.game_over)
+        val message = if (status == GameStatus.GAME_OVER) {
+            getString(R.string.game_over_details, state.score, state.lines, state.level)
+        } else {
+            getString(R.string.gesture_hint)
+        }
+        menuDialog = MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setView(content)
+            .setOnDismissListener { menuDialog = null }
+            .show()
     }
 
-    private fun weightedButtonParams(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(0, 52.dp(), 1f).apply {
-        setMargins(3.dp(), 2.dp(), 3.dp(), 2.dp())
+    private fun startNewGame() {
+        menuDialog?.dismiss()
+        gameOverShown = false
+        gameView.dispatch(GameAction.Restart)
     }
 
     private fun showSettings() {
@@ -183,7 +202,10 @@ class MainActivity : ComponentActivity() {
             settings = settings.copy(theme = settings.theme.next())
             settingsStore.save(settings)
             themeButton.text = themeLabel()
+            themeButton.contentDescription = themeLabel()
             gameView.updateSettings(settings)
+            updateChromeColors()
+            updateActionIconTint()
         }
         content.addView(themeButton)
         content.addView(switchSetting(getString(R.string.show_grid), settings.showGrid) { value ->
@@ -199,6 +221,13 @@ class MainActivity : ComponentActivity() {
         content.addView(switchSetting(getString(R.string.sound), settings.soundEnabled) { value ->
             settings = settings.copy(soundEnabled = value)
             settingsStore.save(settings)
+            feedback.updateSettings(settings)
+            gameView.updateSettings(settings)
+        })
+        content.addView(switchSetting(getString(R.string.music), settings.musicEnabled) { value ->
+            settings = settings.copy(musicEnabled = value)
+            settingsStore.save(settings)
+            feedback.updateSettings(settings)
             gameView.updateSettings(settings)
         })
         content.addView(switchSetting(getString(R.string.haptics), settings.hapticsEnabled) { value ->
@@ -206,18 +235,13 @@ class MainActivity : ComponentActivity() {
             settingsStore.save(settings)
             gameView.updateSettings(settings)
         })
-        content.addView(switchSetting(getString(R.string.left_handed), settings.leftHanded) { value ->
-            settings = settings.copy(leftHanded = value)
-            settingsStore.save(settings)
-            gameView.updateSettings(settings)
-            rebuildControls()
-        })
         val previewButton = actionButton(previewLabel(), getString(R.string.preview_count)) {}
         previewButton.setOnClickListener {
             settings = settings.copy(previewCount = if (settings.previewCount == 5) 1 else settings.previewCount + 1)
             settingsStore.save(settings)
             gameView.updateSettings(settings)
             previewButton.text = previewLabel()
+            previewButton.contentDescription = previewLabel()
         }
         content.addView(previewButton)
         val delayButton = actionButton(delayLabel(), getString(R.string.repeat_delay)) {}
@@ -225,6 +249,7 @@ class MainActivity : ComponentActivity() {
             settings = settings.copy(repeatDelayMs = if (settings.repeatDelayMs >= 400) 80 else settings.repeatDelayMs + 40)
             settingsStore.save(settings)
             delayButton.text = delayLabel()
+            delayButton.contentDescription = delayLabel()
         }
         content.addView(delayButton)
         val rateButton = actionButton(rateLabel(), getString(R.string.repeat_rate)) {}
@@ -232,6 +257,7 @@ class MainActivity : ComponentActivity() {
             settings = settings.copy(repeatRateMs = if (settings.repeatRateMs >= 120) 16 else settings.repeatRateMs + 16)
             settingsStore.save(settings)
             rateButton.text = rateLabel()
+            rateButton.contentDescription = rateLabel()
         }
         content.addView(rateButton)
 
@@ -252,19 +278,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun showGameOver(state: GameState) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.game_over))
-            .setMessage(getString(R.string.game_over_details, state.score, state.lines, state.level))
-            .setPositiveButton(getString(R.string.new_game)) { _, _ ->
-                gameView.dispatch(GameAction.Restart)
-                gameOverShown = false
-            }
-            .setNegativeButton(getString(R.string.high_scores)) { _, _ -> showScores() }
-            .setOnDismissListener { gameOverShown = gameView.state().status == GameStatus.GAME_OVER }
-            .show()
-    }
-
     private fun showScores() {
         val scores = scoreStore.load()
         val message = if (scores.isEmpty()) {
@@ -281,15 +294,75 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    private fun updatePauseLabel() {
-        if (!::pauseButton.isInitialized || !::gameView.isInitialized) return
-        pauseButton.text = if (gameView.state().status == GameStatus.PAUSED) getString(R.string.resume) else getString(R.string.pause)
+    private fun iconButton(icon: Int, description: Int, action: () -> Unit): ImageButton {
+        return ImageButton(this).apply {
+            setImageResource(icon)
+            imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+            val selectable = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)
+            setBackgroundResource(selectable.resourceId)
+            setPadding(12.dp(), 12.dp(), 12.dp(), 12.dp())
+            minimumWidth = 48.dp()
+            minimumHeight = 48.dp()
+            contentDescription = getString(description)
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun actionButton(label: String, description: String, action: () -> Unit): MaterialButton {
+        return MaterialButton(this).apply {
+            text = label
+            contentDescription = description
+            isAllCaps = false
+            minHeight = 48.dp()
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun updatePauseIcon(status: GameStatus) {
+        if (!::pauseButton.isInitialized) return
+        pauseButton.setImageDrawable(ContextCompat.getDrawable(
+            this,
+            when (status) {
+                GameStatus.PAUSED -> R.drawable.ic_play
+                GameStatus.GAME_OVER -> R.drawable.ic_settings
+                GameStatus.RUNNING -> R.drawable.ic_pause
+            },
+        ))
+        pauseButton.imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+        pauseButton.contentDescription = getString(
+            when (status) {
+                GameStatus.PAUSED -> R.string.resume
+                GameStatus.GAME_OVER -> R.string.game_over_menu
+                GameStatus.RUNNING -> R.string.pause
+            },
+        )
+        updateActionIconTint()
+    }
+
+    private fun updateActionIconTint() {
+        if (::settingsButton.isInitialized) {
+            settingsButton.imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+        }
+    }
+
+    private fun updateChromeColors() {
+        if (!::rootView.isInitialized) return
+        val background = GameSurfaceView.backgroundColor(settings.theme)
+        rootView.setBackgroundColor(background)
+        window.statusBarColor = background
+        window.navigationBarColor = background
+        WindowInsetsControllerCompat(window, rootView).apply {
+            val lightBars = settings.theme == ThemeOption.GAME_BOY
+            isAppearanceLightStatusBars = lightBars
+            isAppearanceLightNavigationBars = lightBars
+        }
     }
 
     private fun themeName(theme: ThemeOption): String = when (theme) {
         ThemeOption.CLASSIC -> getString(R.string.classic_theme)
-        ThemeOption.NEON -> getString(R.string.neon_theme)
-        ThemeOption.MONOCHROME -> getString(R.string.mono_theme)
+        ThemeOption.TENGEN_BEVEL -> getString(R.string.tengen_theme)
+        ThemeOption.GAME_BOY -> getString(R.string.gameboy_theme)
     }
 
     private fun themeLabel(): String = getString(R.string.theme_value, getString(R.string.theme), themeName(settings.theme))
@@ -301,38 +374,4 @@ class MainActivity : ComponentActivity() {
     private fun rateLabel(): String = getString(R.string.repeat_rate_value, getString(R.string.repeat_rate), settings.repeatRateMs)
 
     private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
-
-    private class RepeatTouchListener(
-        private val delay: () -> Long,
-        private val rate: () -> Long,
-        private val action: () -> Unit,
-    ) : View.OnTouchListener {
-        private val handler = Handler(Looper.getMainLooper())
-        private var pressed = false
-        private val repeat = object : Runnable {
-            override fun run() {
-                if (!pressed) return
-                action()
-                handler.postDelayed(this, rate().coerceAtLeast(16L))
-            }
-        }
-
-        override fun onTouch(view: View, event: MotionEvent): Boolean {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    pressed = true
-                    action()
-                    handler.postDelayed(repeat, delay().coerceAtLeast(0L))
-                    view.isPressed = true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    pressed = false
-                    handler.removeCallbacks(repeat)
-                    view.isPressed = false
-                    if (event.actionMasked == MotionEvent.ACTION_UP) view.performClick()
-                }
-            }
-            return true
-        }
-    }
 }

@@ -222,6 +222,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             status = if (gameOver) GameStatus.GAME_OVER else GameStatus.RUNNING,
             lastEvent = when {
                 gameOver -> GameEvent.GAME_OVER
+                perfectClear -> GameEvent.PERFECT_CLEAR
                 tSpin != TSpinKind.NONE -> GameEvent.T_SPIN
                 linesCleared > 0 -> GameEvent.LINE_CLEAR
                 else -> GameEvent.LAND

@@ -4,9 +4,18 @@ import android.content.Context
 import androidx.core.content.edit
 
 enum class ThemeOption {
-    CLASSIC, NEON, MONOCHROME;
+    CLASSIC, TENGEN_BEVEL, GAME_BOY;
 
     fun next(): ThemeOption = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        fun fromStoredName(value: String?): ThemeOption = when (value) {
+            TENGEN_BEVEL.name -> TENGEN_BEVEL
+            GAME_BOY.name -> GAME_BOY
+            "NEON", "MONOCHROME" -> CLASSIC
+            else -> CLASSIC
+        }
+    }
 }
 
 data class GameSettings(
@@ -14,6 +23,7 @@ data class GameSettings(
     val showGrid: Boolean = true,
     val showGhost: Boolean = true,
     val soundEnabled: Boolean = true,
+    val musicEnabled: Boolean = true,
     val hapticsEnabled: Boolean = true,
     val leftHanded: Boolean = false,
     val previewCount: Int = 5,
@@ -30,19 +40,25 @@ data class ScoreEntry(
 class SettingsStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-    fun load(): GameSettings = GameSettings(
-        theme = runCatching {
-            ThemeOption.valueOf(preferences.getString(KEY_THEME, ThemeOption.CLASSIC.name).orEmpty())
-        }.getOrDefault(ThemeOption.CLASSIC),
-        showGrid = preferences.getBoolean(KEY_GRID, true),
-        showGhost = preferences.getBoolean(KEY_GHOST, true),
-        soundEnabled = preferences.getBoolean(KEY_SOUND, true),
-        hapticsEnabled = preferences.getBoolean(KEY_HAPTICS, true),
-        leftHanded = preferences.getBoolean(KEY_LEFT_HANDED, false),
-        previewCount = preferences.getInt(KEY_PREVIEW, 5).coerceIn(1, 5),
-        repeatDelayMs = preferences.getInt(KEY_REPEAT_DELAY, 167).coerceIn(80, 400),
-        repeatRateMs = preferences.getInt(KEY_REPEAT_RATE, 33).coerceIn(16, 120),
-    )
+    fun load(): GameSettings {
+        val storedTheme = preferences.getString(KEY_THEME, ThemeOption.CLASSIC.name)
+        val theme = ThemeOption.fromStoredName(storedTheme)
+        if (storedTheme != theme.name) {
+            preferences.edit { putString(KEY_THEME, theme.name) }
+        }
+        return GameSettings(
+            theme = theme,
+            showGrid = preferences.getBoolean(KEY_GRID, true),
+            showGhost = preferences.getBoolean(KEY_GHOST, true),
+            soundEnabled = preferences.getBoolean(KEY_SOUND, true),
+            musicEnabled = preferences.getBoolean(KEY_MUSIC, true),
+            hapticsEnabled = preferences.getBoolean(KEY_HAPTICS, true),
+            leftHanded = preferences.getBoolean(KEY_LEFT_HANDED, false),
+            previewCount = preferences.getInt(KEY_PREVIEW, 5).coerceIn(1, 5),
+            repeatDelayMs = preferences.getInt(KEY_REPEAT_DELAY, 167).coerceIn(80, 400),
+            repeatRateMs = preferences.getInt(KEY_REPEAT_RATE, 33).coerceIn(16, 120),
+        )
+    }
 
     fun save(settings: GameSettings) {
         preferences.edit {
@@ -50,6 +66,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_GRID, settings.showGrid)
             .putBoolean(KEY_GHOST, settings.showGhost)
             .putBoolean(KEY_SOUND, settings.soundEnabled)
+            .putBoolean(KEY_MUSIC, settings.musicEnabled)
             .putBoolean(KEY_HAPTICS, settings.hapticsEnabled)
             .putBoolean(KEY_LEFT_HANDED, settings.leftHanded)
             .putInt(KEY_PREVIEW, settings.previewCount.coerceIn(1, 5))
@@ -64,6 +81,7 @@ class SettingsStore(context: Context) {
         const val KEY_GRID = "grid"
         const val KEY_GHOST = "ghost"
         const val KEY_SOUND = "sound"
+        const val KEY_MUSIC = "music"
         const val KEY_HAPTICS = "haptics"
         const val KEY_LEFT_HANDED = "left_handed"
         const val KEY_PREVIEW = "preview_count"

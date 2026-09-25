@@ -5,8 +5,9 @@ An original, offline Android Tetris implementation built with Kotlin, AndroidX, 
 ## Features
 
 - Guideline-leaning play: 7-bag randomizer, SRS rotations, hold, five-piece preview, ghost piece, lock delay, T-spins, combos, back-to-back clears, perfect clears, and level progression.
-- Portrait touch controls with accessible labels, configurable repeat timing, and left-handed layout support.
-- Classic, neon, and monochrome themes; grid and ghost-piece toggles; sound and haptic feedback.
+- Official-style portrait gestures: distance-based left/right swipes, side taps for rotation, downward drag/drop, and upward hold.
+- Compact HUD with hold/next previews, responsive board sizing, pause/settings menus, and accessible actions.
+- Classic, Tengen Bevel, and Game Boy themes; grid and ghost-piece toggles; original MIDI music, sound effects, and haptics.
 - Persistent settings and top scores. Active games intentionally restart after a new launch.
 - No network access, ads, analytics, or account requirements.
 
