@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.classicfoo.tetris.engine.ActivePiece
@@ -141,7 +142,7 @@ class GameSurfaceView @JvmOverloads constructor(
 
     private fun drawHud(canvas: Canvas, state: GameState, palette: Palette) {
         textPaint.color = palette.text
-        textPaint.textSize = 18f * resources.displayMetrics.scaledDensity
+        textPaint.textSize = 18f.sp()
         textPaint.textAlign = Paint.Align.LEFT
         canvas.drawText("SCORE ${state.score}", 20f, 28f, textPaint)
         canvas.drawText("LEVEL ${state.level}", 20f, 54f, textPaint)
@@ -197,7 +198,7 @@ class GameSurfaceView @JvmOverloads constructor(
         val previewX = boardLeft + BOARD_WIDTH * cellSize + 14f
         val previewY = boardTop + 8f
         textPaint.color = palette.text
-        textPaint.textSize = 12f * resources.displayMetrics.scaledDensity
+        textPaint.textSize = 12f.sp()
         textPaint.textAlign = Paint.Align.LEFT
         canvas.drawText("NEXT", previewX, previewY, textPaint)
         state.next.take(settings.previewCount).forEachIndexed { index, type ->
@@ -246,14 +247,14 @@ class GameSurfaceView @JvmOverloads constructor(
         blockPaint.alpha = 255
         textPaint.color = palette.text
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = 30f * resources.displayMetrics.scaledDensity
+        textPaint.textSize = 30f.sp()
         canvas.drawText(
             if (state.status == com.classicfoo.tetris.engine.GameStatus.PAUSED) "PAUSED" else "GAME OVER",
             width / 2f,
             height / 2f,
             textPaint,
         )
-        textPaint.textSize = 15f * resources.displayMetrics.scaledDensity
+        textPaint.textSize = 15f.sp()
         canvas.drawText("Tap NEW GAME to play again", width / 2f, height / 2f + 34f, textPaint)
         textPaint.textAlign = Paint.Align.LEFT
     }
@@ -294,6 +295,12 @@ class GameSurfaceView @JvmOverloads constructor(
         GameEvent.GAME_OVER -> "GAME OVER"
         else -> ""
     }
+
+    private fun Float.sp(): Float = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP,
+        this,
+        resources.displayMetrics,
+    )
 
     private data class Palette(
         val background: Int,

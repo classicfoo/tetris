@@ -178,11 +178,11 @@ class MainActivity : ComponentActivity() {
         }
         val scroll = ScrollView(this).apply { addView(content) }
 
-        val themeButton = actionButton("${getString(R.string.theme)}: ${themeName(settings.theme)}", getString(R.string.theme)) {}
+        val themeButton = actionButton(themeLabel(), getString(R.string.theme)) {}
         themeButton.setOnClickListener {
             settings = settings.copy(theme = settings.theme.next())
             settingsStore.save(settings)
-            themeButton.text = "${getString(R.string.theme)}: ${themeName(settings.theme)}"
+            themeButton.text = themeLabel()
             gameView.updateSettings(settings)
         }
         content.addView(themeButton)
@@ -212,26 +212,26 @@ class MainActivity : ComponentActivity() {
             gameView.updateSettings(settings)
             rebuildControls()
         })
-        val previewButton = actionButton("${getString(R.string.preview_count)}: ${settings.previewCount}", getString(R.string.preview_count)) {}
+        val previewButton = actionButton(previewLabel(), getString(R.string.preview_count)) {}
         previewButton.setOnClickListener {
             settings = settings.copy(previewCount = if (settings.previewCount == 5) 1 else settings.previewCount + 1)
             settingsStore.save(settings)
             gameView.updateSettings(settings)
-            previewButton.text = "${getString(R.string.preview_count)}: ${settings.previewCount}"
+            previewButton.text = previewLabel()
         }
         content.addView(previewButton)
-        val delayButton = actionButton("${getString(R.string.repeat_delay)}: ${settings.repeatDelayMs} ms", getString(R.string.repeat_delay)) {}
+        val delayButton = actionButton(delayLabel(), getString(R.string.repeat_delay)) {}
         delayButton.setOnClickListener {
             settings = settings.copy(repeatDelayMs = if (settings.repeatDelayMs >= 400) 80 else settings.repeatDelayMs + 40)
             settingsStore.save(settings)
-            delayButton.text = "${getString(R.string.repeat_delay)}: ${settings.repeatDelayMs} ms"
+            delayButton.text = delayLabel()
         }
         content.addView(delayButton)
-        val rateButton = actionButton("${getString(R.string.repeat_rate)}: ${settings.repeatRateMs} ms", getString(R.string.repeat_rate)) {}
+        val rateButton = actionButton(rateLabel(), getString(R.string.repeat_rate)) {}
         rateButton.setOnClickListener {
             settings = settings.copy(repeatRateMs = if (settings.repeatRateMs >= 120) 16 else settings.repeatRateMs + 16)
             settingsStore.save(settings)
-            rateButton.text = "${getString(R.string.repeat_rate)}: ${settings.repeatRateMs} ms"
+            rateButton.text = rateLabel()
         }
         content.addView(rateButton)
 
@@ -255,7 +255,7 @@ class MainActivity : ComponentActivity() {
     private fun showGameOver(state: GameState) {
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.game_over))
-            .setMessage("Score ${state.score}\nLines ${state.lines}\nLevel ${state.level}")
+            .setMessage(getString(R.string.game_over_details, state.score, state.lines, state.level))
             .setPositiveButton(getString(R.string.new_game)) { _, _ ->
                 gameView.dispatch(GameAction.Restart)
                 gameOverShown = false
@@ -271,7 +271,7 @@ class MainActivity : ComponentActivity() {
             getString(R.string.no_scores)
         } else {
             scores.mapIndexed { index, score ->
-                "${index + 1}. ${score.score} points · ${score.lines} lines · level ${score.level}"
+                getString(R.string.score_entry_format, index + 1, score.score, score.lines, score.level)
             }.joinToString("\n")
         }
         MaterialAlertDialogBuilder(this)
@@ -291,6 +291,14 @@ class MainActivity : ComponentActivity() {
         ThemeOption.NEON -> getString(R.string.neon_theme)
         ThemeOption.MONOCHROME -> getString(R.string.mono_theme)
     }
+
+    private fun themeLabel(): String = getString(R.string.theme_value, getString(R.string.theme), themeName(settings.theme))
+
+    private fun previewLabel(): String = getString(R.string.preview_count_value, getString(R.string.preview_count), settings.previewCount)
+
+    private fun delayLabel(): String = getString(R.string.repeat_delay_value, getString(R.string.repeat_delay), settings.repeatDelayMs)
+
+    private fun rateLabel(): String = getString(R.string.repeat_rate_value, getString(R.string.repeat_rate), settings.repeatRateMs)
 
     private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
 

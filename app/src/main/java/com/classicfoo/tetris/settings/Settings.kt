@@ -1,7 +1,7 @@
 package com.classicfoo.tetris.settings
 
 import android.content.Context
-import com.classicfoo.tetris.engine.Tetromino
+import androidx.core.content.edit
 
 enum class ThemeOption {
     CLASSIC, NEON, MONOCHROME;
@@ -45,7 +45,7 @@ class SettingsStore(context: Context) {
     )
 
     fun save(settings: GameSettings) {
-        preferences.edit()
+        preferences.edit {
             .putString(KEY_THEME, settings.theme.name)
             .putBoolean(KEY_GRID, settings.showGrid)
             .putBoolean(KEY_GHOST, settings.showGhost)
@@ -55,7 +55,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_PREVIEW, settings.previewCount.coerceIn(1, 5))
             .putInt(KEY_REPEAT_DELAY, settings.repeatDelayMs.coerceIn(80, 400))
             .putInt(KEY_REPEAT_RATE, settings.repeatRateMs.coerceIn(16, 120))
-            .apply()
+        }
     }
 
     private companion object {
@@ -96,7 +96,7 @@ class ScoreStore(context: Context) {
             .sortedWith(compareByDescending<ScoreEntry> { it.score }.thenByDescending { it.lines })
             .take(MAX_SCORES)
         val encoded = updated.joinToString(";") { "${it.score},${it.lines},${it.level}" }
-        preferences.edit().putString(KEY_SCORES, encoded).apply()
+        preferences.edit { putString(KEY_SCORES, encoded) }
         return updated
     }
 
@@ -106,6 +106,3 @@ class ScoreStore(context: Context) {
         const val MAX_SCORES = 10
     }
 }
-
-@Suppress("UNUSED_PARAMETER")
-private fun Tetromino?.asSaveValue(): String = this?.name.orEmpty()

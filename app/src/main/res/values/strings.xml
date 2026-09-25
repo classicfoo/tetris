@@ -14,6 +14,12 @@
     <string name="resume">Resume</string>
     <string name="new_game">New game</string>
     <string name="game_over">Game over</string>
+    <string name="game_over_details">Score %1$d\nLines %2$d\nLevel %3$d</string>
+    <string name="theme_value">%1$s: %2$s</string>
+    <string name="preview_count_value">%1$s: %2$d</string>
+    <string name="repeat_delay_value">%1$s: %2$d ms</string>
+    <string name="repeat_rate_value">%1$s: %2$d ms</string>
+    <string name="score_entry_format">%1$d. %2$d points · %3$d lines · level %4$d</string>
     <string name="score_format">Score %1$d</string>
     <string name="lines_format">Lines %1$d</string>
     <string name="level_format">Level %1$d</string>
