@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Tetris" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/tetris_background</item>
+        <item name="android:navigationBarColor">@color/tetris_background</item>
+        <item name="android:colorAccent">@color/tetris_primary</item>
+        <item name="colorPrimary">@color/tetris_primary</item>
+        <item name="colorOnPrimary">@color/tetris_on_primary</item>
+        <item name="colorSecondary">@color/tetris_secondary</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
