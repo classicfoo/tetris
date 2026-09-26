@@ -12,6 +12,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     private var lockResets = 0
     private var lastActionWasRotation = false
     private var clearSequenceCounter = 0L
+    private var pieceIdCounter = 0L
 
     var state: GameState = createInitialState()
         private set
@@ -56,6 +57,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             status = GameStatus.RUNNING,
             ghostY = current.y,
             clearSequence = clearSequenceCounter,
+            boardPieceIds = BoardRules.emptyPieceIds(),
         )
     }
 
@@ -185,9 +187,12 @@ class GameEngine(seed: Long = System.nanoTime()) {
 
     private fun lockCurrent() {
         val tSpin = detectTSpin()
+        val pieceId = nextPieceId()
         val locked = BoardRules.lock(state.board, state.current)
-        val clearResult = BoardRules.clearLinesWithRows(locked)
+        val lockedPieceIds = BoardRules.lockPieceIds(state.boardPieceIds, state.current, pieceId)
+        val clearResult = BoardRules.clearLinesWithPieceIds(locked, lockedPieceIds)
         val clearedBoard = clearResult.board
+        val clearedBoardPieceIds = clearResult.boardPieceIds
         val linesCleared = clearResult.count
         if (linesCleared > 0) clearSequenceCounter++
         val perfectClear = linesCleared > 0 && BoardRules.isEmpty(clearedBoard)
@@ -216,6 +221,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
 
         state = state.copy(
             board = clearedBoard,
+            boardPieceIds = clearedBoardPieceIds,
             current = nextCurrent,
             next = nextQueue,
             holdUsed = false,
@@ -243,6 +249,11 @@ class GameEngine(seed: Long = System.nanoTime()) {
         lockElapsedMs = 0
         lockResets = 0
         lastActionWasRotation = false
+    }
+
+    private fun nextPieceId(): Long {
+        pieceIdCounter += 1L
+        return pieceIdCounter
     }
 
     private fun detectTSpin(): TSpinKind {

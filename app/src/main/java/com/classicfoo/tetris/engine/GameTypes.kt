@@ -71,4 +71,13 @@ data class GameState(
     val lastScoreDelta: Long = 0,
     val lastTSpin: TSpinKind = TSpinKind.NONE,
     val perfectClear: Boolean = false,
+    /**
+     * The stable ownership id for each locked cell. A null cell is empty;
+     * cells belonging to one locked tetromino share an id.
+     */
+    val boardPieceIds: List<List<Long?>> = emptyBoardPieceIds(),
 )
+
+internal fun emptyBoardPieceIds(): List<List<Long?>> = List(BOARD_HEIGHT) {
+    List<Long?>(BOARD_WIDTH) { null }
+}

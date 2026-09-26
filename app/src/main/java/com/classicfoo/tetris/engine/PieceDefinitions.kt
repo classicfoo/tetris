@@ -32,6 +32,8 @@ internal object BoardRules {
         List<Tetromino?>(BOARD_WIDTH) { null }
     }
 
+    fun emptyPieceIds(): List<List<Long?>> = com.classicfoo.tetris.engine.emptyBoardPieceIds()
+
     fun canPlace(board: List<List<Tetromino?>>, piece: ActivePiece): Boolean {
         return PieceDefinitions.cells(piece.type, piece.rotation).all { cell ->
             val x = piece.x + cell.x
@@ -60,8 +62,36 @@ internal object BoardRules {
         return result.map { it.toList() }
     }
 
+    /**
+     * Locks one tetromino into its parallel ownership grid. All cells written
+     * by the piece share [pieceId], so touching pieces remain distinguishable
+     * even when they use the same tetromino type.
+     */
+    fun lockPieceIds(
+        boardPieceIds: List<List<Long?>>,
+        piece: ActivePiece,
+        pieceId: Long,
+    ): List<List<Long?>> {
+        val result = boardPieceIds.map { it.toMutableList() }.toMutableList()
+        for (cell in PieceDefinitions.cells(piece.type, piece.rotation)) {
+            val x = piece.x + cell.x
+            val y = piece.y + cell.y
+            if (x in 0 until BOARD_WIDTH && y in 0 until BOARD_HEIGHT) {
+                result[y][x] = pieceId
+            }
+        }
+        return result.map { it.toList() }
+    }
+
     data class LineClearResult(
         val board: List<List<Tetromino?>>,
+        val count: Int,
+        val clearedRows: List<Int>,
+    )
+
+    data class LineClearWithPieceIdsResult(
+        val board: List<List<Tetromino?>>,
+        val boardPieceIds: List<List<Long?>>,
         val count: Int,
         val clearedRows: List<Int>,
     )
@@ -80,6 +110,33 @@ internal object BoardRules {
             board = result,
             count = cleared,
             clearedRows = clearedRows,
+        )
+    }
+
+    /**
+     * Clears the same rows from the board and its ownership grid. Rows above
+     * cleared rows move down together, preserving each cell's provenance.
+     */
+    fun clearLinesWithPieceIds(
+        board: List<List<Tetromino?>>,
+        boardPieceIds: List<List<Long?>>,
+    ): LineClearWithPieceIdsResult {
+        require(boardPieceIds.size == BOARD_HEIGHT) { "Ownership grid must have $BOARD_HEIGHT rows" }
+        require(boardPieceIds.all { it.size == BOARD_WIDTH }) {
+            "Ownership grid must have $BOARD_WIDTH columns"
+        }
+
+        val boardResult = clearLinesWithRows(board)
+        val remainingIds = boardPieceIds.filterIndexed { index, _ -> index !in boardResult.clearedRows }
+        val emptyRows = BOARD_HEIGHT - remainingIds.size
+        val compactedIds = List(emptyRows) {
+            List<Long?>(BOARD_WIDTH) { null }
+        } + remainingIds
+        return LineClearWithPieceIdsResult(
+            board = boardResult.board,
+            boardPieceIds = compactedIds,
+            count = boardResult.count,
+            clearedRows = boardResult.clearedRows,
         )
     }
 
