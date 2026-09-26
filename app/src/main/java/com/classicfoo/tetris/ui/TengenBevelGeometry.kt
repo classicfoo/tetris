@@ -72,14 +72,6 @@ object TengenBevelPalette {
     )
 }
 
-data class TengenMiterPatch(
-    val polygon: PixelPolygon,
-    val corner: PixelPoint,
-    val firstBevelEndpoint: PixelPoint,
-    val miter: PixelPoint,
-    val secondBevelEndpoint: PixelPoint,
-)
-
 /**
  * Integer geometry for Tengen-style blocks. Joined cells share their base face,
  * while exposed bevel polygons meet at calculated inside-miter endpoints.
@@ -92,7 +84,6 @@ data class TengenBevelParts(
     val left: PixelPolygon?,
     val right: PixelPolygon?,
     val bottom: PixelPolygon?,
-    val miterPatches: List<TengenMiterPatch> = emptyList(),
 ) {
     val isFlat: Boolean get() = bevelPx == 0
 
@@ -173,18 +164,12 @@ object TengenBevelGeometry {
             .toMap()
         val indexByCoordinate = sortedEntries.mapIndexed { index, entry -> entry.coordinate to index }.toMap()
         val adjusted = parts.toMutableList()
-        concaveMiterJoins(byCoordinate, partsByCoordinate).forEach { join ->
-            listOf(join.firstAdjustment, join.secondAdjustment).forEach { adjustment ->
-                val index = indexByCoordinate[adjustment.coordinate] ?: return@forEach
-                adjusted[index] = adjusted[index].withEdgePoint(
-                    edge = adjustment.edge,
-                    pointIndex = adjustment.pointIndex,
-                    point = adjustment.miter,
-                )
-            }
-            val patchIndex = indexByCoordinate[join.targetCoordinate] ?: return@forEach
-            adjusted[patchIndex] = adjusted[patchIndex].copy(
-                miterPatches = adjusted[patchIndex].miterPatches + join.patch,
+        concaveMiterAdjustments(byCoordinate, partsByCoordinate).forEach { adjustment ->
+            val index = indexByCoordinate[adjustment.coordinate] ?: return@forEach
+            adjusted[index] = adjusted[index].withEdgePoint(
+                edge = adjustment.edge,
+                pointIndex = adjustment.pointIndex,
+                point = adjustment.miter,
             )
         }
         return adjusted
@@ -307,18 +292,11 @@ object TengenBevelGeometry {
         val secondPointIndex: Int,
     )
 
-    private data class MiterJoin(
-        val firstAdjustment: MiterAdjustment,
-        val secondAdjustment: MiterAdjustment,
-        val targetCoordinate: PixelPoint,
-        val patch: TengenMiterPatch,
-    )
-
-    private fun concaveMiterJoins(
+    private fun concaveMiterAdjustments(
         occupied: Map<PixelPoint, TengenGridCell>,
         partsByCoordinate: Map<PixelPoint, TengenBevelParts>,
-    ): List<MiterJoin> {
-        val result = mutableListOf<MiterJoin>()
+    ): List<MiterAdjustment> {
+        val result = mutableListOf<MiterAdjustment>()
         val minX = occupied.keys.minOf { it.x }
         val maxX = occupied.keys.maxOf { it.x }
         val minY = occupied.keys.minOf { it.y }
@@ -392,43 +370,22 @@ object TengenBevelGeometry {
                     CornerQuadrant.BOTTOM_RIGHT,
                     -> PixelPoint(secondPoint.x, firstPoint.y)
                 }
-                if (firstPoint == miter || secondPoint == miter || firstPoint == secondPoint) continue
-                val corner = vertexFor(quadrants)
-                result += MiterJoin(
-                    firstAdjustment = MiterAdjustment(
-                        coordinate = boundary.firstCoordinate,
-                        edge = boundary.firstEdge,
-                        pointIndex = boundary.firstPointIndex,
-                        miter = miter,
-                    ),
-                    secondAdjustment = MiterAdjustment(
-                        coordinate = boundary.secondCoordinate,
-                        edge = boundary.secondEdge,
-                        pointIndex = boundary.secondPointIndex,
-                        miter = miter,
-                    ),
-                    targetCoordinate = quadrants.getValue(diagonal)!!.coordinate,
-                    patch = TengenMiterPatch(
-                        polygon = polygon(corner, firstPoint, miter, secondPoint),
-                        corner = corner,
-                        firstBevelEndpoint = firstPoint,
-                        miter = miter,
-                        secondBevelEndpoint = secondPoint,
-                    ),
+                result += MiterAdjustment(
+                    coordinate = boundary.firstCoordinate,
+                    edge = boundary.firstEdge,
+                    pointIndex = boundary.firstPointIndex,
+                    miter = miter,
+                )
+                result += MiterAdjustment(
+                    coordinate = boundary.secondCoordinate,
+                    edge = boundary.secondEdge,
+                    pointIndex = boundary.secondPointIndex,
+                    miter = miter,
                 )
             }
         }
         return result
     }
-
-    private fun vertexFor(quadrants: Map<CornerQuadrant, TengenGridCell?>): PixelPoint = PixelPoint(
-        x = quadrants[CornerQuadrant.TOP_RIGHT]?.bounds?.left
-            ?: quadrants[CornerQuadrant.BOTTOM_RIGHT]?.bounds?.left
-            ?: quadrants[CornerQuadrant.TOP_LEFT]!!.bounds.right,
-        y = quadrants[CornerQuadrant.BOTTOM_LEFT]?.bounds?.top
-            ?: quadrants[CornerQuadrant.BOTTOM_RIGHT]?.bounds?.top
-            ?: quadrants[CornerQuadrant.TOP_LEFT]!!.bounds.bottom,
-    )
 
     private fun endpoint(polygon: PixelPolygon?, index: Int): PixelPoint? = polygon?.points?.getOrNull(index)
 

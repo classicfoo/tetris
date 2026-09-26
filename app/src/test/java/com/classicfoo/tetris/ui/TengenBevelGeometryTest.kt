@@ -65,7 +65,6 @@ class TengenBevelGeometryTest {
 
         assertTrue(parts.all { it.isFlat })
         assertTrue(parts.all { it.edgePolygons.isEmpty() })
-        assertTrue(parts.all { it.miterPatches.isEmpty() })
     }
 
     @Test
@@ -194,23 +193,15 @@ class TengenBevelGeometryTest {
             ),
         )
 
-        assertEquals(2, parts.flatMap { it.miterPatches }.size)
-        assertEquals(2, parts.flatMap { it.miterPatches }.map { it.corner }.toSet().size)
         assertMiter(
             parts,
             miter = PixelPoint(48, 48),
-            corner = PixelPoint(40, 40),
-            firstEndpoint = PixelPoint(48, 40),
-            secondEndpoint = PixelPoint(40, 48),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
         assertMiter(
             parts,
             miter = PixelPoint(72, 48),
-            corner = PixelPoint(80, 40),
-            firstEndpoint = PixelPoint(72, 40),
-            secondEndpoint = PixelPoint(80, 48),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(80, 40, 120, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
@@ -228,13 +219,9 @@ class TengenBevelGeometryTest {
             ),
         )
 
-        assertEquals(1, parts.flatMap { it.miterPatches }.size)
         assertMiter(
             parts,
             miter = PixelPoint(32, 88),
-            corner = PixelPoint(40, 80),
-            firstEndpoint = PixelPoint(32, 80),
-            secondEndpoint = PixelPoint(40, 88),
             adjacentCells = listOf(PixelRect(0, 40, 40, 80), PixelRect(40, 80, 80, 120)),
             diagonalFace = PixelRect(0, 80, 40, 120),
         )
@@ -254,22 +241,9 @@ class TengenBevelGeometryTest {
         assertMiter(
             s,
             miter = PixelPoint(48, 48),
-            corner = PixelPoint(40, 40),
-            firstEndpoint = PixelPoint(48, 40),
-            secondEndpoint = PixelPoint(40, 48),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
-        assertMiter(
-            s,
-            miter = PixelPoint(72, 32),
-            corner = PixelPoint(80, 40),
-            firstEndpoint = PixelPoint(80, 32),
-            secondEndpoint = PixelPoint(72, 40),
-            adjacentCells = listOf(PixelRect(80, 0, 120, 40), PixelRect(40, 40, 80, 80)),
-            diagonalFace = PixelRect(40, 0, 80, 40),
-        )
-        assertEquals(2, s.flatMap { it.miterPatches }.size)
         assertNoCrossCellPositiveAreaOverlap(s)
 
         val z = TengenBevelGeometry.fromCells(
@@ -283,22 +257,9 @@ class TengenBevelGeometryTest {
         assertMiter(
             z,
             miter = PixelPoint(48, 32),
-            corner = PixelPoint(40, 40),
-            firstEndpoint = PixelPoint(40, 32),
-            secondEndpoint = PixelPoint(48, 40),
             adjacentCells = listOf(PixelRect(0, 0, 40, 40), PixelRect(40, 40, 80, 80)),
             diagonalFace = PixelRect(40, 0, 80, 40),
         )
-        assertMiter(
-            z,
-            miter = PixelPoint(72, 48),
-            corner = PixelPoint(80, 40),
-            firstEndpoint = PixelPoint(72, 40),
-            secondEndpoint = PixelPoint(80, 48),
-            adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(80, 40, 120, 80)),
-            diagonalFace = PixelRect(40, 40, 80, 80),
-        )
-        assertEquals(2, z.flatMap { it.miterPatches }.size)
         assertNoCrossCellPositiveAreaOverlap(z)
     }
 
@@ -321,9 +282,6 @@ class TengenBevelGeometryTest {
     private fun assertMiter(
         parts: List<TengenBevelParts>,
         miter: PixelPoint,
-        corner: PixelPoint,
-        firstEndpoint: PixelPoint,
-        secondEndpoint: PixelPoint,
         adjacentCells: List<PixelRect>,
         diagonalFace: PixelRect,
     ) {
@@ -337,11 +295,6 @@ class TengenBevelGeometryTest {
             2,
             parts.flatMap { it.edgePolygons }.count { miter in it.points },
         )
-        val patches = parts.flatMap { it.miterPatches }
-        assertEquals("one opaque patch is required for each concave corner", 1, patches.count { it.corner == corner })
-        val patch = patches.single { it.corner == corner }
-        assertEquals(listOf(corner, firstEndpoint, miter, secondEndpoint), patch.polygon.points)
-        assertEquals("miter patch must have four unique corners", 4, patch.polygon.points.toSet().size)
         assertTrue("miter must land in the diagonal cell face", diagonalFace.contains(miter))
     }
 
