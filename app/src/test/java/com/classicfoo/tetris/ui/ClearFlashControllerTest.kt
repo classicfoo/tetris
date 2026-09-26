@@ -50,8 +50,10 @@ class ClearFlashControllerTest {
         controller.observe(state(0), nowMs = 0L)
         controller.observe(state(1, rows = listOf(19)), nowMs = 10L)
 
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 58L).active)
-        assertEquals(0, controller.observe(state(1, rows = listOf(19)), nowMs = 58L).alpha)
+        val darkBeat = controller.observe(state(1, rows = listOf(19)), nowMs = 58L)
+        assertFalse(darkBeat.active)
+        assertEquals(0, darkBeat.alpha)
+        assertEquals(listOf(19), darkBeat.rows)
         assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
         assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
     }

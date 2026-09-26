@@ -147,12 +147,14 @@ class GameSurfaceView @JvmOverloads constructor(
 
         drawHud(canvas, state, palette, layout)
         drawBoard(canvas, state, palette, layout, clearFlash)
+        drawAccolade(canvas, state, palette, layout)
 
         if (state.status == GameStatus.PAUSED || state.status == GameStatus.GAME_OVER) {
             drawOverlay(canvas, palette)
         }
 
-        if (clearFlash.active) {
+        // Keep ticking through the intentionally dark gaps between flashes.
+        if (clearFlash.rows.isNotEmpty()) {
             postInvalidateOnAnimation()
         }
     }
@@ -229,13 +231,38 @@ class GameSurfaceView @JvmOverloads constructor(
             }
         }
 
-        val eventLabel = state.lastEventLabel()
-        if (eventLabel.isNotEmpty()) {
-            textPaint.color = palette.accent
-            textPaint.textAlign = Paint.Align.CENTER
-            textPaint.textSize = canvasSp(15f, 17f)
-            canvas.drawText(eventLabel, width / 2f, cardTop + cardHeight / 2f + dp(5f), textPaint)
-        }
+    }
+
+    private fun drawAccolade(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
+        val label = state.lastEventLabel()
+        if (label.isEmpty()) return
+
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = canvasSp(18f, 24f)
+        val centerX = (layout.boardLeft + layout.boardRight) / 2f
+        val baseline = (layout.boardTop + layout.boardBottom) / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
+        val horizontalPadding = dp(16f)
+        val verticalPadding = dp(9f)
+        val box = RectF(
+            centerX - textPaint.measureText(label) / 2f - horizontalPadding,
+            baseline + textPaint.ascent() - verticalPadding,
+            centerX + textPaint.measureText(label) / 2f + horizontalPadding,
+            baseline + textPaint.descent() + verticalPadding,
+        )
+
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.color = palette.overlay
+        blockPaint.alpha = 232
+        canvas.drawRoundRect(box, dp(10f), dp(10f), blockPaint)
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = max(1f, dp(1f))
+        blockPaint.color = palette.accent
+        blockPaint.alpha = 220
+        canvas.drawRoundRect(box, dp(10f), dp(10f), blockPaint)
+        blockPaint.style = Paint.Style.FILL
+        textPaint.color = palette.accent
+        canvas.drawText(label, centerX, baseline, textPaint)
+        blockPaint.alpha = 255
     }
 
     private fun drawStat(canvas: Canvas, label: String, value: String, centerX: Float, top: Float, bottom: Float, palette: Palette) {
@@ -322,23 +349,33 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * The engine stores locked cells by colour, so connected same-colour
-     * regions are the smallest renderable approximation of a locked piece.
-     * Different regions are submitted separately and retain their outer
-     * one-pixel inset.
+     * Draw locked cells as one joined silhouette per original tetromino.
+     *
+     * The piece type alone is not enough here: two adjacent O pieces must
+     * keep their own outer bevels even though they share a colour. The engine
+     * therefore supplies a stable owner id for every locked cell. States
+     * created by older callers may not have ids, so each such cell gets a
+     * coordinate-specific fallback id instead of accidentally joining to its
+     * neighbour.
      */
     private fun drawTengenBoard(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
-        val occupied = buildMap {
+        val occupied = buildMap<PixelPoint, TengenBoardCell> {
             state.board.forEachIndexed { y, row ->
                 row.forEachIndexed { x, type ->
-                    if (type != null) put(PixelPoint(x, y), type)
+                    if (type != null) {
+                        val ownerId = state.boardPieceIds
+                            .getOrNull(y)
+                            ?.getOrNull(x)
+                            ?: fallbackOwnerId(x, y)
+                        put(PixelPoint(x, y), TengenBoardCell(type, ownerId))
+                    }
                 }
             }
         }
         val remaining = occupied.keys.toMutableSet()
         while (remaining.isNotEmpty()) {
             val start = remaining.minWithOrNull(compareBy<PixelPoint> { it.y }.thenBy { it.x }) ?: break
-            val type = occupied.getValue(start)
+            val owner = occupied.getValue(start)
             val group = mutableListOf<PixelPoint>()
             val pending = ArrayDeque<PixelPoint>()
             pending.addLast(start)
@@ -347,7 +384,7 @@ class GameSurfaceView @JvmOverloads constructor(
                 val cell = pending.removeLast()
                 group += cell
                 neighboringCells(cell).forEach { neighbor ->
-                    if (neighbor in remaining && occupied[neighbor] == type) {
+                    if (neighbor in remaining && occupied[neighbor] == owner) {
                         remaining.remove(neighbor)
                         pending.addLast(neighbor)
                     }
@@ -355,12 +392,14 @@ class GameSurfaceView @JvmOverloads constructor(
             }
             drawTengenPiece(
                 canvas = canvas,
-                type = type,
+                type = owner.type,
                 cells = group.map { cell -> pixelGridCell(cell.x, cell.y, layout.boardLeft, layout.boardTop, layout.cellSize) },
                 palette = palette,
             )
         }
     }
+
+    private fun fallbackOwnerId(x: Int, y: Int): Long = -1L - (y * BOARD_WIDTH + x).toLong()
 
     private fun neighboringCells(cell: PixelPoint): List<PixelPoint> = listOf(
         PixelPoint(cell.x, cell.y - 1),
@@ -705,7 +744,7 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     private fun GameState.lastEventLabel(): String = when (lastEvent) {
-        GameEvent.LINE_CLEAR -> if (lastLines == 4) "TETRIS!" else "CLEAR!"
+        GameEvent.LINE_CLEAR -> ClearAccolade.forLines(lastLines).label
         GameEvent.T_SPIN -> "T-SPIN!"
         GameEvent.PERFECT_CLEAR -> "PERFECT CLEAR!"
         GameEvent.GAME_OVER -> "GAME OVER"
@@ -733,6 +772,11 @@ class GameSurfaceView @JvmOverloads constructor(
         val boardTop: Float,
         val boardRight: Float,
         val boardBottom: Float,
+    )
+
+    private data class TengenBoardCell(
+        val type: Tetromino,
+        val ownerId: Long,
     )
 
     private data class Palette(
