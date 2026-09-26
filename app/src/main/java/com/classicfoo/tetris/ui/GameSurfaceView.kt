@@ -1,6 +1,7 @@
 package com.classicfoo.tetris.ui
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -24,7 +25,7 @@ import com.classicfoo.tetris.engine.Rotation
 import com.classicfoo.tetris.engine.Tetromino
 import com.classicfoo.tetris.settings.GameSettings
 import com.classicfoo.tetris.settings.ThemeOption
-import java.util.ArrayDeque
+import java.util.LinkedHashMap
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -37,6 +38,8 @@ class GameSurfaceView @JvmOverloads constructor(
     private val feedback: Feedback? = null,
 ) : View(context, attrs) {
     companion object {
+        private const val ACTIVE_PIECE_OWNER_ID = Long.MIN_VALUE
+
         fun iconColor(theme: ThemeOption): Int = Palette.forTheme(theme).text
 
         fun backgroundColor(theme: ThemeOption): Int = Palette.forTheme(theme).background
@@ -65,6 +68,11 @@ class GameSurfaceView @JvmOverloads constructor(
     private var stateListener: ((GameState) -> Unit)? = null
     private var gestureInterpreter = GestureInterpreter()
     private val clearFlashController = ClearFlashController()
+    private var tengenBoardCacheKey: TengenBoardCacheKey? = null
+    private var tengenBoardSurface: TengenBitmapSurface? = null
+    private val tengenPieceBitmaps = object : LinkedHashMap<TengenPieceCacheKey, Bitmap>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TengenPieceCacheKey, Bitmap>?): Boolean = size > 64
+    }
 
     private val frame = object : Runnable {
         override fun run() {
@@ -89,6 +97,11 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     fun updateSettings(newSettings: GameSettings) {
+        if (settings.theme != newSettings.theme) {
+            tengenBoardCacheKey = null
+            tengenBoardSurface = null
+            tengenPieceBitmaps.clear()
+        }
         settings = newSettings
         updateGestureConfig()
         feedback?.updateSettings(settings)
@@ -133,6 +146,9 @@ class GameSurfaceView @JvmOverloads constructor(
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
+        tengenBoardCacheKey = null
+        tengenBoardSurface = null
+        tengenPieceBitmaps.clear()
         updateGestureConfig()
     }
 
@@ -355,65 +371,50 @@ class GameSurfaceView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * Draw locked cells as one joined silhouette per original tetromino.
-     *
-     * The piece type alone is not enough here: two adjacent O pieces must
-     * keep their own outer bevels even though they share a colour. The engine
-     * therefore supplies a stable owner id for every locked cell. States
-     * created by older callers may not have ids, so each such cell gets a
-     * coordinate-specific fallback id instead of accidentally joining to its
-     * neighbour.
-     */
     private fun drawTengenBoard(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
-        val occupied = buildMap<PixelPoint, TengenBoardCell> {
-            state.board.forEachIndexed { y, row ->
-                row.forEachIndexed { x, type ->
-                    if (type != null) {
-                        val ownerId = state.boardPieceIds
-                            .getOrNull(y)
-                            ?.getOrNull(x)
-                            ?: fallbackOwnerId(x, y)
-                        put(PixelPoint(x, y), TengenBoardCell(type, ownerId))
+        val key = TengenBoardCacheKey(
+            boardHash = state.board.hashCode(),
+            ownershipHash = state.boardPieceIds.hashCode(),
+            theme = settings.theme,
+            clearSequence = state.clearSequence,
+            clearing = state.isClearing,
+            clearedRowsHash = state.lastClearedRows.hashCode(),
+            left = snap(layout.boardLeft).toInt(),
+            top = snap(layout.boardTop).toInt(),
+            right = snap(layout.boardRight).toInt(),
+            bottom = snap(layout.boardBottom).toInt(),
+        )
+        if (key != tengenBoardCacheKey) {
+            val cells = buildList {
+                state.board.forEachIndexed { y, row ->
+                    row.forEachIndexed { x, type ->
+                        if (type != null) {
+                            add(
+                                TengenRasterCell(
+                                    coordinate = PixelPoint(x, y),
+                                    bounds = pixelGridCell(x, y, layout.boardLeft, layout.boardTop, layout.cellSize).bounds,
+                                    ramp = palette.ramp(type),
+                                    ownerId = state.boardPieceIds
+                                        .getOrNull(y)
+                                        ?.getOrNull(x)
+                                        ?: fallbackOwnerId(x, y),
+                                ),
+                            )
+                        }
                     }
                 }
             }
+            tengenBoardSurface = TengenPieceRasterizer.rasterize(cells, palette.pixelOutline)?.toBitmapSurface()
+            tengenBoardCacheKey = key
         }
-        val remaining = occupied.keys.toMutableSet()
-        while (remaining.isNotEmpty()) {
-            val start = remaining.minWithOrNull(compareBy<PixelPoint> { it.y }.thenBy { it.x }) ?: break
-            val owner = occupied.getValue(start)
-            val group = mutableListOf<PixelPoint>()
-            val pending = ArrayDeque<PixelPoint>()
-            pending.addLast(start)
-            remaining.remove(start)
-            while (pending.isNotEmpty()) {
-                val cell = pending.removeLast()
-                group += cell
-                neighboringCells(cell).forEach { neighbor ->
-                    if (neighbor in remaining && occupied[neighbor] == owner) {
-                        remaining.remove(neighbor)
-                        pending.addLast(neighbor)
-                    }
-                }
-            }
-            drawTengenPiece(
-                canvas = canvas,
-                type = owner.type,
-                cells = group.map { cell -> pixelGridCell(cell.x, cell.y, layout.boardLeft, layout.boardTop, layout.cellSize) },
-                palette = palette,
-            )
-        }
+
+        val surface = tengenBoardSurface ?: return
+        pixelPaint.alpha = 255
+        pixelPaint.isFilterBitmap = false
+        canvas.drawBitmap(surface.bitmap, surface.left.toFloat(), surface.top.toFloat(), pixelPaint)
     }
 
     private fun fallbackOwnerId(x: Int, y: Int): Long = -1L - (y * BOARD_WIDTH + x).toLong()
-
-    private fun neighboringCells(cell: PixelPoint): List<PixelPoint> = listOf(
-        PixelPoint(cell.x, cell.y - 1),
-        PixelPoint(cell.x - 1, cell.y),
-        PixelPoint(cell.x + 1, cell.y),
-        PixelPoint(cell.x, cell.y + 1),
-    )
 
     private fun drawClearFlash(
         canvas: Canvas,
@@ -546,30 +547,53 @@ class GameSurfaceView @JvmOverloads constructor(
         palette: Palette,
     ) {
         val ramp = palette.ramp(type)
-        val parts = TengenBevelGeometry.fromCells(cells)
-        pixelPaint.style = Paint.Style.FILL
+        val originLeft = cells.minOf { it.bounds.left }
+        val originTop = cells.minOf { it.bounds.top }
+        val gridLeft = cells.minOf { it.coordinate.x }
+        val gridTop = cells.minOf { it.coordinate.y }
+        val normalizedCells = cells.map { cell ->
+            TengenRasterCell(
+                coordinate = PixelPoint(cell.coordinate.x - gridLeft, cell.coordinate.y - gridTop),
+                bounds = PixelRect(
+                    left = cell.bounds.left - originLeft,
+                    top = cell.bounds.top - originTop,
+                    right = cell.bounds.right - originLeft,
+                    bottom = cell.bounds.bottom - originTop,
+                ),
+                ramp = ramp,
+                ownerId = ACTIVE_PIECE_OWNER_ID,
+            )
+        }.sortedWith(compareBy<TengenRasterCell> { it.coordinate.y }.thenBy { it.coordinate.x })
+        val key = TengenPieceCacheKey(
+            ramp = ramp,
+            outlineColor = palette.pixelOutline,
+            cells = normalizedCells.map { cell ->
+                TengenPieceCellKey(
+                    coordinate = cell.coordinate,
+                    bounds = cell.bounds,
+                )
+            },
+        )
+        val bitmap = tengenPieceBitmaps[key] ?: TengenPieceRasterizer.rasterize(
+            cells = normalizedCells,
+            outlineColor = palette.pixelOutline,
+        )?.toBitmap()?.also { rendered ->
+            tengenPieceBitmaps[key] = rendered
+        } ?: return
         pixelPaint.alpha = 255
-
-        // Paint the silhouette first. Internal cell edges are covered by the
-        // joined faces below, while the exposed one-pixel outline remains.
-        pixelPaint.color = palette.pixelOutline
-        parts.forEach { part -> canvas.drawRect(part.cell.toRectF(), pixelPaint) }
-
-        parts.forEach { part ->
-            pixelPaint.color = ramp.base
-            canvas.drawRect(part.face.toRectF(), pixelPaint)
-        }
-        parts.flatMap { it.miterPatches }.forEach { patch ->
-            drawPolygon(canvas, patch.polygon, ramp.base)
-        }
-        parts.forEach { part ->
-            drawPolygon(canvas, part.top, ramp.highlight)
-            drawPolygon(canvas, part.left, ramp.highlight)
-            drawPolygon(canvas, part.right, ramp.shadow)
-            drawPolygon(canvas, part.bottom, ramp.shadow)
-        }
-        pixelPaint.alpha = 255
+        pixelPaint.isFilterBitmap = false
+        canvas.drawBitmap(bitmap, originLeft.toFloat(), originTop.toFloat(), pixelPaint)
     }
+
+    private fun TengenRasterImage.toBitmap(): Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+        it.setPixels(pixels, 0, width, 0, 0, width, height)
+    }
+
+    private fun TengenRasterImage.toBitmapSurface(): TengenBitmapSurface = TengenBitmapSurface(
+        bitmap = toBitmap(),
+        left = bounds.left,
+        top = bounds.top,
+    )
 
     private fun drawCell(
         canvas: Canvas,
@@ -786,9 +810,34 @@ class GameSurfaceView @JvmOverloads constructor(
         val boardBottom: Float,
     )
 
-    private data class TengenBoardCell(
-        val type: Tetromino,
-        val ownerId: Long,
+    private data class TengenBoardCacheKey(
+        val boardHash: Int,
+        val ownershipHash: Int,
+        val theme: ThemeOption,
+        val clearSequence: Long,
+        val clearing: Boolean,
+        val clearedRowsHash: Int,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
+    private data class TengenBitmapSurface(
+        val bitmap: Bitmap,
+        val left: Int,
+        val top: Int,
+    )
+
+    private data class TengenPieceCacheKey(
+        val ramp: OpaqueColorRamp,
+        val outlineColor: Int,
+        val cells: List<TengenPieceCellKey>,
+    )
+
+    private data class TengenPieceCellKey(
+        val coordinate: PixelPoint,
+        val bounds: PixelRect,
     )
 
     private data class Palette(
