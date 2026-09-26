@@ -559,6 +559,9 @@ class GameSurfaceView @JvmOverloads constructor(
             pixelPaint.color = ramp.base
             canvas.drawRect(part.face.toRectF(), pixelPaint)
         }
+        parts.flatMap { it.miterPatches }.forEach { patch ->
+            drawPolygon(canvas, patch.polygon, ramp.base)
+        }
         parts.forEach { part ->
             drawPolygon(canvas, part.top, ramp.highlight)
             drawPolygon(canvas, part.left, ramp.highlight)
