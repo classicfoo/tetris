@@ -153,6 +153,28 @@ object TengenBevelGeometry {
                         right = PixelPoint(coordinate.x + 1, coordinate.y) !in byCoordinate,
                         bottom = PixelPoint(coordinate.x, coordinate.y + 1) !in byCoordinate,
                     ),
+                    corners = CornerJoins(
+                        topLeft = cornerJoin(
+                            byCoordinate,
+                            coordinate,
+                            corner = Corner.TOP_LEFT,
+                        ),
+                        topRight = cornerJoin(
+                            byCoordinate,
+                            coordinate,
+                            corner = Corner.TOP_RIGHT,
+                        ),
+                        bottomLeft = cornerJoin(
+                            byCoordinate,
+                            coordinate,
+                            corner = Corner.BOTTOM_LEFT,
+                        ),
+                        bottomRight = cornerJoin(
+                            byCoordinate,
+                            coordinate,
+                            corner = Corner.BOTTOM_RIGHT,
+                        ),
+                    ),
                     gutterPx = gutterPx,
                 )
             }
@@ -161,6 +183,7 @@ object TengenBevelGeometry {
     private fun fromCell(
         cell: PixelRect,
         exposed: ExposedEdges,
+        corners: CornerJoins = CornerJoins.NONE,
         gutterPx: Int,
     ): TengenBevelParts {
         val gutter = gutterPx.coerceAtLeast(0)
@@ -192,14 +215,16 @@ object TengenBevelGeometry {
             face = face,
             bevelPx = bevel,
             top = if (exposed.top) {
-                // The top edge owns the top corners.  If a side is also
-                // exposed, its shared diagonal is the one boundary between
-                // the two colours; neither polygon owns the corner twice.
+                // A concave endpoint uses the inward miter too. This keeps a
+                // notch's highlight on the same diagonal contour as the
+                // neighboring edge instead of leaving a square step at the
+                // join. Convex corners still use the top edge's shared
+                // diagonal ownership.
                 polygon(
                     PixelPoint(l, t),
                     PixelPoint(r, t),
-                    PixelPoint(if (exposed.right) innerRight else r, innerTop),
-                    PixelPoint(if (exposed.left) innerLeft else l, innerTop),
+                    topInnerRight(exposed, corners.topRight, innerRight, innerTop, r),
+                    topInnerLeft(exposed, corners.topLeft, innerLeft, innerTop, l),
                 )
             } else {
                 null
@@ -207,8 +232,8 @@ object TengenBevelGeometry {
             left = if (exposed.left) {
                 polygon(
                     PixelPoint(l, t),
-                    PixelPoint(innerLeft, if (exposed.top) innerTop else t),
-                    PixelPoint(innerLeft, if (exposed.bottom) innerBottom else b),
+                    leftInnerTop(exposed, corners.topLeft, innerLeft, innerTop, t),
+                    leftInnerBottom(exposed, corners.bottomLeft, innerLeft, innerBottom, b),
                     PixelPoint(l, b),
                 )
             } else {
@@ -218,8 +243,8 @@ object TengenBevelGeometry {
                 polygon(
                     PixelPoint(r, t),
                     PixelPoint(r, b),
-                    PixelPoint(innerRight, if (exposed.bottom) innerBottom else b),
-                    PixelPoint(innerRight, if (exposed.top) innerTop else t),
+                    rightInnerBottom(exposed, corners.bottomRight, innerRight, innerBottom, b),
+                    rightInnerTop(exposed, corners.topRight, innerRight, innerTop, t),
                 )
             } else {
                 null
@@ -228,8 +253,8 @@ object TengenBevelGeometry {
                 polygon(
                     PixelPoint(l, b),
                     PixelPoint(r, b),
-                    PixelPoint(if (exposed.right) innerRight else r, innerBottom),
-                    PixelPoint(if (exposed.left) innerLeft else l, innerBottom),
+                    bottomInnerRight(exposed, corners.bottomRight, innerRight, innerBottom, r),
+                    bottomInnerLeft(exposed, corners.bottomLeft, innerLeft, innerBottom, l),
                 )
             } else {
                 null
@@ -246,6 +271,170 @@ object TengenBevelGeometry {
         companion object {
             val ALL = ExposedEdges(top = true, left = true, right = true, bottom = true)
         }
+    }
+
+    /** The four local quadrants around a cell corner. */
+    private enum class Corner {
+        TOP_LEFT,
+        TOP_RIGHT,
+        BOTTOM_LEFT,
+        BOTTOM_RIGHT,
+    }
+
+    /**
+     * A three-cell corner is a concave notch in the joined silhouette.  The
+     * bevel at that corner must turn inward, rather than ending in a square
+     * cap.  Convex and neutral corners retain the normal edge ownership.
+     */
+    private enum class CornerJoin {
+        NONE,
+        CONCAVE,
+    }
+
+    private data class CornerJoins(
+        val topLeft: CornerJoin,
+        val topRight: CornerJoin,
+        val bottomLeft: CornerJoin,
+        val bottomRight: CornerJoin,
+    ) {
+        companion object {
+            val NONE = CornerJoins(
+                topLeft = CornerJoin.NONE,
+                topRight = CornerJoin.NONE,
+                bottomLeft = CornerJoin.NONE,
+                bottomRight = CornerJoin.NONE,
+            )
+        }
+    }
+
+    private fun cornerJoin(
+        occupied: Map<PixelPoint, TengenGridCell>,
+        coordinate: PixelPoint,
+        corner: Corner,
+    ): CornerJoin {
+        val quadrants = when (corner) {
+            Corner.TOP_LEFT -> listOf(
+                PixelPoint(coordinate.x, coordinate.y),
+                PixelPoint(coordinate.x, coordinate.y - 1),
+                PixelPoint(coordinate.x - 1, coordinate.y),
+                PixelPoint(coordinate.x - 1, coordinate.y - 1),
+            )
+            Corner.TOP_RIGHT -> listOf(
+                PixelPoint(coordinate.x, coordinate.y),
+                PixelPoint(coordinate.x, coordinate.y - 1),
+                PixelPoint(coordinate.x + 1, coordinate.y),
+                PixelPoint(coordinate.x + 1, coordinate.y - 1),
+            )
+            Corner.BOTTOM_LEFT -> listOf(
+                PixelPoint(coordinate.x, coordinate.y),
+                PixelPoint(coordinate.x, coordinate.y + 1),
+                PixelPoint(coordinate.x - 1, coordinate.y),
+                PixelPoint(coordinate.x - 1, coordinate.y + 1),
+            )
+            Corner.BOTTOM_RIGHT -> listOf(
+                PixelPoint(coordinate.x, coordinate.y),
+                PixelPoint(coordinate.x, coordinate.y + 1),
+                PixelPoint(coordinate.x + 1, coordinate.y),
+                PixelPoint(coordinate.x + 1, coordinate.y + 1),
+            )
+        }
+        return if (quadrants.count { it in occupied } == 3) CornerJoin.CONCAVE else CornerJoin.NONE
+    }
+
+    private fun topInnerLeft(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerLeft: Int,
+        innerTop: Int,
+        outerLeft: Int,
+    ): PixelPoint = if (exposed.left || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerLeft, innerTop)
+    } else {
+        PixelPoint(outerLeft, innerTop)
+    }
+
+    private fun topInnerRight(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerRight: Int,
+        innerTop: Int,
+        outerRight: Int,
+    ): PixelPoint = if (exposed.right || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerRight, innerTop)
+    } else {
+        PixelPoint(outerRight, innerTop)
+    }
+
+    private fun leftInnerTop(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerLeft: Int,
+        innerTop: Int,
+        outerTop: Int,
+    ): PixelPoint = if (exposed.top || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerLeft, innerTop)
+    } else {
+        PixelPoint(innerLeft, outerTop)
+    }
+
+    private fun leftInnerBottom(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerLeft: Int,
+        innerBottom: Int,
+        outerBottom: Int,
+    ): PixelPoint = if (exposed.bottom || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerLeft, innerBottom)
+    } else {
+        PixelPoint(innerLeft, outerBottom)
+    }
+
+    private fun rightInnerTop(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerRight: Int,
+        innerTop: Int,
+        outerTop: Int,
+    ): PixelPoint = if (exposed.top || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerRight, innerTop)
+    } else {
+        PixelPoint(innerRight, outerTop)
+    }
+
+    private fun rightInnerBottom(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerRight: Int,
+        innerBottom: Int,
+        outerBottom: Int,
+    ): PixelPoint = if (exposed.bottom || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerRight, innerBottom)
+    } else {
+        PixelPoint(innerRight, outerBottom)
+    }
+
+    private fun bottomInnerLeft(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerLeft: Int,
+        innerBottom: Int,
+        outerLeft: Int,
+    ): PixelPoint = if (exposed.left || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerLeft, innerBottom)
+    } else {
+        PixelPoint(outerLeft, innerBottom)
+    }
+
+    private fun bottomInnerRight(
+        exposed: ExposedEdges,
+        corner: CornerJoin,
+        innerRight: Int,
+        innerBottom: Int,
+        outerRight: Int,
+    ): PixelPoint = if (exposed.right || corner == CornerJoin.CONCAVE) {
+        PixelPoint(innerRight, innerBottom)
+    } else {
+        PixelPoint(outerRight, innerBottom)
     }
 
     private fun polygon(vararg points: PixelPoint): PixelPolygon = PixelPolygon(points.toList())

@@ -168,6 +168,75 @@ class TengenBevelGeometryTest {
         vertical.forEach { assertNoPositiveAreaOverlap(it.edgePolygons) }
     }
 
+    @Test
+    fun `T notch gives both light corners an inward miter`() {
+        val parts = TengenBevelGeometry.fromCells(
+            listOf(
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(1, 1, 40, 40, 80, 80),
+                gridCell(2, 1, 80, 40, 120, 80),
+            ),
+        )
+
+        val upper = parts.single { it.cell == PixelRect(40, 0, 80, 40) }
+        val lowerLeft = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
+
+        assertContainsPoint(upper.left, PixelPoint(48, 33))
+        assertContainsPoint(lowerLeft.top, PixelPoint(33, 48))
+        assertNoCrossCellPositiveAreaOverlap(parts)
+    }
+
+    @Test
+    fun `L notch joins a shadow right edge to a light top edge`() {
+        val parts = TengenBevelGeometry.fromCells(
+            listOf(
+                gridCell(0, 0, 0, 0, 40, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(0, 2, 0, 80, 40, 120),
+                gridCell(1, 2, 40, 80, 80, 120),
+            ),
+        )
+
+        val vertical = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
+        val foot = parts.single { it.cell == PixelRect(40, 80, 80, 120) }
+
+        assertContainsPoint(vertical.right, PixelPoint(32, 73))
+        assertContainsPoint(foot.top, PixelPoint(48, 88))
+        assertNoCrossCellPositiveAreaOverlap(parts)
+    }
+
+    @Test
+    fun `S and Z notches retain light and shadow orientation`() {
+        val s = TengenBevelGeometry.fromCells(
+            listOf(
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(2, 0, 80, 0, 120, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(1, 1, 40, 40, 80, 80),
+            ),
+        )
+        val sUpper = s.single { it.cell == PixelRect(40, 0, 80, 40) }
+        val sLowerLeft = s.single { it.cell == PixelRect(0, 40, 40, 80) }
+        assertContainsPoint(sUpper.left, PixelPoint(48, 33))
+        assertContainsPoint(sLowerLeft.top, PixelPoint(33, 48))
+        assertNoCrossCellPositiveAreaOverlap(s)
+
+        val z = TengenBevelGeometry.fromCells(
+            listOf(
+                gridCell(0, 0, 0, 0, 40, 40),
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(1, 1, 40, 40, 80, 80),
+                gridCell(2, 1, 80, 40, 120, 80),
+            ),
+        )
+        val zUpperLeft = z.single { it.cell == PixelRect(0, 0, 40, 40) }
+        val zLowerMiddle = z.single { it.cell == PixelRect(40, 40, 80, 80) }
+        assertContainsPoint(zUpperLeft.bottom, PixelPoint(33, 32))
+        assertContainsPoint(zLowerMiddle.left, PixelPoint(48, 47))
+        assertNoCrossCellPositiveAreaOverlap(z)
+    }
+
     private fun assertNoPositiveAreaOverlap(polygons: List<PixelPolygon>) {
         polygons.forEachIndexed { index, polygon ->
             polygons.drop(index + 1).forEach { other ->
@@ -177,6 +246,16 @@ class TengenBevelGeometryTest {
                 )
             }
         }
+    }
+
+    private fun assertNoCrossCellPositiveAreaOverlap(parts: List<TengenBevelParts>) {
+        val polygons = parts.flatMap { it.edgePolygons }
+        assertNoPositiveAreaOverlap(polygons)
+    }
+
+    private fun assertContainsPoint(polygon: PixelPolygon?, expected: PixelPoint) {
+        assertNotNull("expected a bevel polygon containing $expected", polygon)
+        assertTrue("expected bevel polygon to contain $expected", expected in polygon!!.points)
     }
 
     /** Separating-axis test: shared edges/diagonals are allowed, filled overlap is not. */
