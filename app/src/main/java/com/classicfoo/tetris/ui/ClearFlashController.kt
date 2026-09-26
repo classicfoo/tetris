@@ -17,15 +17,25 @@ data class ClearFlashFrame(
  * The controller has no Android clock or drawing dependencies; callers provide uptime.
  */
 class ClearFlashController(
-    private val durationMs: Long = 140L,
-    private val maxAlpha: Int = 56,
+    private val durationMs: Long = DEFAULT_DURATION_MS,
+    private val maxAlpha: Int = DEFAULT_MAX_ALPHA,
 ) {
+    companion object {
+        /** A little over a quarter second gives the clear room to read as three flashes. */
+        const val DEFAULT_DURATION_MS: Long = 252L
+        const val DEFAULT_MAX_ALPHA: Int = 56
+
+        private const val PULSE_COUNT = 3
+        /** Each flash fades out before the next one begins, leaving a clear dark beat. */
+        private const val ACTIVE_FRACTION = 0.56f
+    }
+
     private var seenSequence: Long? = null
     private var pulseStartedAtMs: Long? = null
     private var pulseRows: List<Int> = emptyList()
 
     init {
-        require(durationMs in 120L..160L) { "Clear pulse must last 120-160 ms" }
+        require(durationMs in 220L..280L) { "Clear pulse must last 220-280 ms" }
         require(maxAlpha in 48..64) { "Clear pulse alpha must be 48-64" }
     }
 
@@ -72,9 +82,21 @@ class ClearFlashController(
             return ClearFlashFrame()
         }
 
-        val remaining = durationMs - elapsed
-        val alpha = (maxAlpha * remaining.toFloat() / durationMs).roundToInt()
-            .coerceIn(1, maxAlpha)
+        val alpha = pulseAlpha(elapsed)
         return ClearFlashFrame(pulseRows, alpha)
+    }
+
+    /**
+     * Three identical, deterministic flashes: a bright leading edge, a quick fade, a
+     * dark beat, then the next flash. The final pulse also fades to zero before expiry.
+     */
+    private fun pulseAlpha(elapsedMs: Long): Int {
+        val periodMs = durationMs.toFloat() / PULSE_COUNT
+        val phase = (elapsedMs.toFloat() % periodMs) / periodMs
+        if (phase >= ACTIVE_FRACTION) return 0
+
+        return (maxAlpha * (1f - phase / ACTIVE_FRACTION))
+            .roundToInt()
+            .coerceIn(0, maxAlpha)
     }
 }

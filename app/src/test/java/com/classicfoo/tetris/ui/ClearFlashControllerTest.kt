@@ -11,7 +11,7 @@ import org.junit.Test
 
 class ClearFlashControllerTest {
     @Test
-    fun `new clear sequence starts one fading row pulse`() {
+    fun `new clear sequence starts a deterministic three flash row pulse`() {
         val controller = ClearFlashController()
 
         assertFalse(controller.observe(state(0), nowMs = 0L).active)
@@ -21,25 +21,39 @@ class ClearFlashControllerTest {
         )
         val tick = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 150L,
+            nowMs = 124L,
         )
 
         assertTrue(start.active)
         assertEquals(listOf(17, 18, 19), start.rows)
         assertEquals(56, start.alpha)
-        assertEquals(36, tick.alpha)
+        assertEquals(27, tick.alpha)
         assertTrue(tick.alpha < start.alpha)
+
+        val secondFlash = controller.observe(
+            state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
+            nowMs = 184L,
+        )
+        val thirdFlash = controller.observe(
+            state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
+            nowMs = 268L,
+        )
+
+        assertEquals(56, secondFlash.alpha)
+        assertEquals(56, thirdFlash.alpha)
     }
 
     @Test
-    fun `pulse expires exactly at configured duration and does not retrigger on Tick`() {
+    fun `dark beats do not retrigger on Tick and pulse expires at configured duration`() {
         val controller = ClearFlashController()
 
         controller.observe(state(0), nowMs = 0L)
         controller.observe(state(1, rows = listOf(19)), nowMs = 10L)
 
-        assertTrue(controller.observe(state(1, rows = listOf(19)), nowMs = 149L).active)
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 150L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 58L).active)
+        assertEquals(0, controller.observe(state(1, rows = listOf(19)), nowMs = 58L).alpha)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
     }
 
     @Test
