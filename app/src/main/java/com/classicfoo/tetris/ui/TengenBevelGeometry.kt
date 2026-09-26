@@ -100,6 +100,13 @@ object TengenBevelGeometry {
      */
     private const val BEVEL_RATIO = 0.18f
 
+    /**
+     * The one-pixel extension closes the tiny raster gap at an inside miter.
+     * It is directed into the missing quadrant, so the two adjoining bevels
+     * overlap at the corner instead of ending on separate inset vertices.
+     */
+    private const val CONCAVE_CORNER_OVERLAP_PX = 1
+
     fun fromFloat(
         left: Float,
         top: Float,
@@ -287,9 +294,11 @@ object TengenBevelGeometry {
         val firstCoordinate: PixelPoint,
         val firstEdge: Edge,
         val firstPointIndex: Int,
+        val firstCornerPointIndex: Int,
         val secondCoordinate: PixelPoint,
         val secondEdge: Edge,
         val secondPointIndex: Int,
+        val secondCornerPointIndex: Int,
     )
 
     private fun concaveMiterAdjustments(
@@ -325,33 +334,41 @@ object TengenBevelGeometry {
                         firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate,
                         firstEdge = Edge.LEFT,
                         firstPointIndex = 2,
+                        firstCornerPointIndex = 3,
                         secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate,
                         secondEdge = Edge.TOP,
                         secondPointIndex = 2,
+                        secondCornerPointIndex = 1,
                     )
                     CornerQuadrant.TOP_RIGHT -> MiterBoundary(
                         firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate,
                         firstEdge = Edge.RIGHT,
                         firstPointIndex = 2,
+                        firstCornerPointIndex = 1,
                         secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate,
                         secondEdge = Edge.TOP,
                         secondPointIndex = 3,
+                        secondCornerPointIndex = 0,
                     )
                     CornerQuadrant.BOTTOM_LEFT -> MiterBoundary(
                         firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate,
                         firstEdge = Edge.BOTTOM,
                         firstPointIndex = 2,
+                        firstCornerPointIndex = 0,
                         secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate,
                         secondEdge = Edge.LEFT,
                         secondPointIndex = 1,
+                        secondCornerPointIndex = 0,
                     )
                     CornerQuadrant.BOTTOM_RIGHT -> MiterBoundary(
                         firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate,
                         firstEdge = Edge.BOTTOM,
                         firstPointIndex = 3,
+                        firstCornerPointIndex = 0,
                         secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate,
                         secondEdge = Edge.RIGHT,
                         secondPointIndex = 3,
+                        secondCornerPointIndex = 0,
                     )
                 }
                 val firstPoint = endpoint(
@@ -370,6 +387,7 @@ object TengenBevelGeometry {
                     CornerQuadrant.BOTTOM_RIGHT,
                     -> PixelPoint(secondPoint.x, firstPoint.y)
                 }
+                val corner = concaveCorner(quadrants, missing)
                 result += MiterAdjustment(
                     coordinate = boundary.firstCoordinate,
                     edge = boundary.firstEdge,
@@ -377,14 +395,50 @@ object TengenBevelGeometry {
                     miter = miter,
                 )
                 result += MiterAdjustment(
+                    coordinate = boundary.firstCoordinate,
+                    edge = boundary.firstEdge,
+                    pointIndex = boundary.firstCornerPointIndex,
+                    miter = corner,
+                )
+                result += MiterAdjustment(
                     coordinate = boundary.secondCoordinate,
                     edge = boundary.secondEdge,
                     pointIndex = boundary.secondPointIndex,
                     miter = miter,
                 )
+                result += MiterAdjustment(
+                    coordinate = boundary.secondCoordinate,
+                    edge = boundary.secondEdge,
+                    pointIndex = boundary.secondCornerPointIndex,
+                    miter = corner,
+                )
             }
         }
         return result
+    }
+
+    private fun concaveCorner(
+        quadrants: Map<CornerQuadrant, TengenGridCell?>,
+        missing: CornerQuadrant,
+    ): PixelPoint {
+        val vertexX = listOfNotNull(
+            quadrants[CornerQuadrant.TOP_LEFT]?.bounds?.right,
+            quadrants[CornerQuadrant.TOP_RIGHT]?.bounds?.left,
+            quadrants[CornerQuadrant.BOTTOM_LEFT]?.bounds?.right,
+            quadrants[CornerQuadrant.BOTTOM_RIGHT]?.bounds?.left,
+        ).first()
+        val vertexY = listOfNotNull(
+            quadrants[CornerQuadrant.TOP_LEFT]?.bounds?.bottom,
+            quadrants[CornerQuadrant.TOP_RIGHT]?.bounds?.bottom,
+            quadrants[CornerQuadrant.BOTTOM_LEFT]?.bounds?.top,
+            quadrants[CornerQuadrant.BOTTOM_RIGHT]?.bounds?.top,
+        ).first()
+        val xDirection = if (missing == CornerQuadrant.TOP_LEFT || missing == CornerQuadrant.BOTTOM_LEFT) -1 else 1
+        val yDirection = if (missing == CornerQuadrant.TOP_LEFT || missing == CornerQuadrant.TOP_RIGHT) -1 else 1
+        return PixelPoint(
+            vertexX + xDirection * CONCAVE_CORNER_OVERLAP_PX,
+            vertexY + yDirection * CONCAVE_CORNER_OVERLAP_PX,
+        )
     }
 
     private fun endpoint(polygon: PixelPolygon?, index: Int): PixelPoint? = polygon?.points?.getOrNull(index)

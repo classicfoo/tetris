@@ -199,12 +199,14 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
+        assertConcaveCorner(parts, PixelPoint(39, 39))
         assertMiter(
             parts,
             miter = PixelPoint(72, 48),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(80, 40, 120, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
+        assertConcaveCorner(parts, PixelPoint(81, 39))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -225,6 +227,7 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(0, 40, 40, 80), PixelRect(40, 80, 80, 120)),
             diagonalFace = PixelRect(0, 80, 40, 120),
         )
+        assertConcaveCorner(parts, PixelPoint(41, 79))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -244,6 +247,7 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
+        assertConcaveCorner(s, PixelPoint(39, 39))
         assertNoCrossCellPositiveAreaOverlap(s)
 
         val z = TengenBevelGeometry.fromCells(
@@ -260,7 +264,16 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(0, 0, 40, 40), PixelRect(40, 40, 80, 80)),
             diagonalFace = PixelRect(40, 0, 80, 40),
         )
+        assertConcaveCorner(z, PixelPoint(39, 41))
         assertNoCrossCellPositiveAreaOverlap(z)
+    }
+
+    private fun assertConcaveCorner(parts: List<TengenBevelParts>, corner: PixelPoint) {
+        assertEquals(
+            "the adjoining bevel polygons must share the extended concave corner",
+            2,
+            parts.flatMap { it.edgePolygons }.count { corner in it.points },
+        )
     }
 
     private fun assertNoPositiveAreaOverlap(polygons: List<PixelPolygon>) {
