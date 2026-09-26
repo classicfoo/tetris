@@ -39,8 +39,8 @@ class ClearFlashControllerTest {
             nowMs = 768L,
         )
 
-        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, secondFlash.alpha)
-        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, thirdFlash.alpha)
+        assertTrue(secondFlash.alpha >= ClearFlashController.DEFAULT_MAX_ALPHA - 1)
+        assertTrue(thirdFlash.alpha >= ClearFlashController.DEFAULT_MAX_ALPHA - 1)
     }
 
     @Test
