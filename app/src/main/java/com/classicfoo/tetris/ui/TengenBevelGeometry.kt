@@ -92,6 +92,14 @@ data class TengenBevelParts(
 }
 
 object TengenBevelGeometry {
+    /**
+     * Tengen's blocks use a conspicuous pixel rim rather than a hairline
+     * highlight.  The cap below leaves a real centre face on small preview
+     * cells while allowing normal board cells to use a substantially wider
+     * bevel.
+     */
+    private const val BEVEL_RATIO = 0.18f
+
     fun fromFloat(
         left: Float,
         top: Float,
@@ -164,7 +172,7 @@ object TengenBevelGeometry {
             bottom = cell.bottom - if (canInset && exposed.bottom) gutter else 0,
         )
         val maximumBevel = min(face.width / 3, face.height / 3)
-        val targetBevel = max(1, (min(cell.width, cell.height) * 0.10f).roundToInt())
+        val targetBevel = max(1, (min(cell.width, cell.height) * BEVEL_RATIO).roundToInt())
         val bevel = min(targetBevel, maximumBevel)
         if (bevel < 1) {
             return TengenBevelParts(cell, face, 0, null, null, null, null)
@@ -174,24 +182,55 @@ object TengenBevelGeometry {
         val t = face.top
         val r = face.right
         val b = face.bottom
+        val innerLeft = l + bevel
+        val innerTop = t + bevel
+        val innerRight = r - bevel
+        val innerBottom = b - bevel
 
         return TengenBevelParts(
             cell = cell,
             face = face,
             bevelPx = bevel,
-            top = if (exposed.top) polygon(l, t, r, t + bevel) else null,
+            top = if (exposed.top) {
+                // The top edge owns the top corners.  If a side is also
+                // exposed, its shared diagonal is the one boundary between
+                // the two colours; neither polygon owns the corner twice.
+                polygon(
+                    PixelPoint(l, t),
+                    PixelPoint(r, t),
+                    PixelPoint(if (exposed.right) innerRight else r, innerTop),
+                    PixelPoint(if (exposed.left) innerLeft else l, innerTop),
+                )
+            } else {
+                null
+            },
             left = if (exposed.left) {
-                polygon(l, t + if (exposed.top) bevel else 0, l + bevel, b - if (exposed.bottom) bevel else 0)
+                polygon(
+                    PixelPoint(l, t),
+                    PixelPoint(innerLeft, if (exposed.top) innerTop else t),
+                    PixelPoint(innerLeft, if (exposed.bottom) innerBottom else b),
+                    PixelPoint(l, b),
+                )
             } else {
                 null
             },
             right = if (exposed.right) {
-                polygon(r - bevel, t + if (exposed.top) bevel else 0, r, b - if (exposed.bottom) bevel else 0)
+                polygon(
+                    PixelPoint(r, t),
+                    PixelPoint(r, b),
+                    PixelPoint(innerRight, if (exposed.bottom) innerBottom else b),
+                    PixelPoint(innerRight, if (exposed.top) innerTop else t),
+                )
             } else {
                 null
             },
             bottom = if (exposed.bottom) {
-                polygon(l + if (exposed.left) bevel else 0, b - bevel, r - if (exposed.right) bevel else 0, b)
+                polygon(
+                    PixelPoint(l, b),
+                    PixelPoint(r, b),
+                    PixelPoint(if (exposed.right) innerRight else r, innerBottom),
+                    PixelPoint(if (exposed.left) innerLeft else l, innerBottom),
+                )
             } else {
                 null
             },
@@ -209,13 +248,5 @@ object TengenBevelGeometry {
         }
     }
 
-    private fun polygon(left: Int, top: Int, right: Int, bottom: Int): PixelPolygon =
-        PixelPolygon(
-            listOf(
-                PixelPoint(left, top),
-                PixelPoint(right, top),
-                PixelPoint(right, bottom),
-                PixelPoint(left, bottom),
-            ),
-        )
+    private fun polygon(vararg points: PixelPoint): PixelPolygon = PixelPolygon(points.toList())
 }
