@@ -202,7 +202,7 @@ class TengenBevelGeometryTest {
         val foot = parts.single { it.cell == PixelRect(40, 80, 80, 120) }
 
         assertContainsPoint(vertical.right, PixelPoint(32, 73))
-        assertContainsPoint(foot.top, PixelPoint(48, 88))
+        assertContainsPoint(foot.top, PixelPoint(47, 88))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
