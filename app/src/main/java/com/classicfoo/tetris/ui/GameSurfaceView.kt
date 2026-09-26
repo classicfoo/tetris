@@ -24,6 +24,7 @@ import com.classicfoo.tetris.engine.Rotation
 import com.classicfoo.tetris.engine.Tetromino
 import com.classicfoo.tetris.settings.GameSettings
 import com.classicfoo.tetris.settings.ThemeOption
+import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -305,9 +306,13 @@ class GameSurfaceView @JvmOverloads constructor(
 
         drawClearFlash(canvas, layout, palette, clearFlash)
 
-        state.board.forEachIndexed { y, row ->
-            row.forEachIndexed { x, type ->
-                if (type != null) drawCell(canvas, type, layout.boardLeft + x * layout.cellSize, layout.boardTop + y * layout.cellSize, layout.cellSize, palette)
+        if (palette.bevel) {
+            drawTengenBoard(canvas, state, palette, layout)
+        } else {
+            state.board.forEachIndexed { y, row ->
+                row.forEachIndexed { x, type ->
+                    if (type != null) drawCell(canvas, type, layout.boardLeft + x * layout.cellSize, layout.boardTop + y * layout.cellSize, layout.cellSize, palette)
+                }
             }
         }
         if (settings.showGhost && state.status == GameStatus.RUNNING) {
@@ -315,6 +320,54 @@ class GameSurfaceView @JvmOverloads constructor(
         }
         drawPiece(canvas, state.current, palette, layout, ghost = false)
     }
+
+    /**
+     * The engine stores locked cells by colour, so connected same-colour
+     * regions are the smallest renderable approximation of a locked piece.
+     * Different regions are submitted separately and retain their outer
+     * one-pixel inset.
+     */
+    private fun drawTengenBoard(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
+        val occupied = buildMap {
+            state.board.forEachIndexed { y, row ->
+                row.forEachIndexed { x, type ->
+                    if (type != null) put(PixelPoint(x, y), type)
+                }
+            }
+        }
+        val remaining = occupied.keys.toMutableSet()
+        while (remaining.isNotEmpty()) {
+            val start = remaining.minWithOrNull(compareBy<PixelPoint> { it.y }.thenBy { it.x }) ?: break
+            val type = occupied.getValue(start)
+            val group = mutableListOf<PixelPoint>()
+            val pending = ArrayDeque<PixelPoint>()
+            pending.addLast(start)
+            remaining.remove(start)
+            while (pending.isNotEmpty()) {
+                val cell = pending.removeLast()
+                group += cell
+                neighboringCells(cell).forEach { neighbor ->
+                    if (neighbor in remaining && occupied[neighbor] == type) {
+                        remaining.remove(neighbor)
+                        pending.addLast(neighbor)
+                    }
+                }
+            }
+            drawTengenPiece(
+                canvas = canvas,
+                type = type,
+                cells = group.map { cell -> pixelGridCell(cell.x, cell.y, layout.boardLeft, layout.boardTop, layout.cellSize) },
+                palette = palette,
+            )
+        }
+    }
+
+    private fun neighboringCells(cell: PixelPoint): List<PixelPoint> = listOf(
+        PixelPoint(cell.x, cell.y - 1),
+        PixelPoint(cell.x - 1, cell.y),
+        PixelPoint(cell.x + 1, cell.y),
+        PixelPoint(cell.x, cell.y + 1),
+    )
 
     private fun drawClearFlash(
         canvas: Canvas,
@@ -354,13 +407,54 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     private fun drawPiece(canvas: Canvas, piece: ActivePiece, palette: Palette, layout: BoardLayout, ghost: Boolean) {
-        PieceDefinitions.cells(piece.type, piece.rotation).forEach { block ->
+        val blocks = PieceDefinitions.cells(piece.type, piece.rotation)
+        if (palette.bevel && ghost) {
+            drawTengenGhost(canvas, piece, palette, layout)
+            return
+        }
+        if (palette.bevel && !ghost) {
+            val visibleCells = blocks.mapNotNull { block ->
+                val gridX = piece.x + block.x
+                val gridY = piece.y + block.y
+                val cell = pixelGridCell(gridX, gridY, layout.boardLeft, layout.boardTop, layout.cellSize)
+                if (cell.bounds.bottom >= snap(layout.boardTop).toInt() && cell.bounds.top <= snap(layout.boardBottom).toInt()) {
+                    cell
+                } else {
+                    null
+                }
+            }
+            if (visibleCells.isNotEmpty()) drawTengenPiece(canvas, piece.type, visibleCells, palette)
+            return
+        }
+        blocks.forEach { block ->
             val x = layout.boardLeft + (piece.x + block.x) * layout.cellSize
             val y = layout.boardTop + (piece.y + block.y) * layout.cellSize
             if (y + layout.cellSize >= layout.boardTop && y <= layout.boardBottom) {
                 drawCell(canvas, piece.type, x, y, layout.cellSize, palette, ghost)
             }
         }
+    }
+
+    /** Tengen ghosts are a light, connected silhouette rather than four outlines. */
+    private fun drawTengenGhost(
+        canvas: Canvas,
+        piece: ActivePiece,
+        palette: Palette,
+        layout: BoardLayout,
+    ) {
+        val geometry = GhostPieceGeometry.from(piece)
+        pixelPaint.style = Paint.Style.FILL
+        pixelPaint.color = palette.ghostColor
+        pixelPaint.alpha = palette.ghostAlpha
+        geometry.solidRegions.forEach { region ->
+            if (region.bottom <= 0 || region.top >= BOARD_HEIGHT) return@forEach
+            val left = snap(layout.boardLeft + region.left * layout.cellSize)
+            val top = snap(layout.boardTop + region.top * layout.cellSize)
+            val right = snap(layout.boardLeft + region.right * layout.cellSize)
+            val bottom = snap(layout.boardTop + region.bottom * layout.cellSize)
+            canvas.drawRect(left, top, right, bottom, pixelPaint)
+        }
+        pixelPaint.alpha = 255
     }
 
     private fun drawMiniPiece(canvas: Canvas, type: Tetromino, palette: Palette, left: Float, top: Float, width: Float, height: Float, cell: Float) {
@@ -372,9 +466,58 @@ class GameSurfaceView @JvmOverloads constructor(
         val pieceHeight = (cells.maxOf { it.y } - minY + 1) * cell
         val x = left + (width - pieceWidth) / 2f
         val y = top + max(0f, (height - pieceHeight) / 2f)
+        if (palette.bevel) {
+            drawTengenPiece(
+                canvas = canvas,
+                type = type,
+                cells = cells.map { block ->
+                    pixelGridCell(block.x - minX, block.y - minY, x, y, cell)
+                },
+                palette = palette,
+            )
+            return
+        }
         cells.forEach { block ->
             drawCell(canvas, type, x + (block.x - minX) * cell, y + (block.y - minY) * cell, cell, palette)
         }
+    }
+
+    private fun pixelGridCell(gridX: Int, gridY: Int, originX: Float, originY: Float, size: Float): TengenGridCell {
+        val left = snap(originX + gridX * size).toInt()
+        val top = snap(originY + gridY * size).toInt()
+        val right = snap(originX + (gridX + 1) * size).toInt()
+        val bottom = snap(originY + (gridY + 1) * size).toInt()
+        return TengenGridCell(
+            coordinate = PixelPoint(gridX, gridY),
+            bounds = PixelRect(left, top, right, bottom),
+        )
+    }
+
+    private fun drawTengenPiece(
+        canvas: Canvas,
+        type: Tetromino,
+        cells: List<TengenGridCell>,
+        palette: Palette,
+    ) {
+        val ramp = palette.ramp(type)
+        val parts = TengenBevelGeometry.fromCells(cells)
+        pixelPaint.style = Paint.Style.FILL
+        pixelPaint.alpha = 255
+
+        // Paint the silhouette first. Internal cell edges are covered by the
+        // joined faces below, while the exposed one-pixel outline remains.
+        pixelPaint.color = palette.pixelOutline
+        parts.forEach { part -> canvas.drawRect(part.cell.toRectF(), pixelPaint) }
+
+        parts.forEach { part ->
+            pixelPaint.color = ramp.base
+            canvas.drawRect(part.face.toRectF(), pixelPaint)
+            drawPolygon(canvas, part.top, ramp.highlight)
+            drawPolygon(canvas, part.left, ramp.highlight)
+            drawPolygon(canvas, part.right, ramp.shadow)
+            drawPolygon(canvas, part.bottom, ramp.shadow)
+        }
+        pixelPaint.alpha = 255
     }
 
     private fun drawCell(
@@ -434,13 +577,13 @@ class GameSurfaceView @JvmOverloads constructor(
         if (ghost) {
             pixelPaint.color = palette.ghostColor
             val face = parts.face
-            canvas.drawRect(
+            val faceRect = RectF(
                 face.left + 0.5f,
                 face.top + 0.5f,
                 face.right - 0.5f,
                 face.bottom - 0.5f,
-                pixelPaint,
             )
+            canvas.drawRect(faceRect, pixelPaint)
         } else {
             pixelPaint.color = palette.boardFrame
             canvas.drawRect(parts.cell.toRectF(), pixelPaint)

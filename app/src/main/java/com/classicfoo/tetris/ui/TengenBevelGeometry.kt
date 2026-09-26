@@ -28,6 +28,12 @@ data class PixelRect(
             max(top, other.top) < min(bottom, other.bottom)
 }
 
+/** A logical cell and its already pixel-snapped drawing rectangle. */
+data class TengenGridCell(
+    val coordinate: PixelPoint,
+    val bounds: PixelRect,
+)
+
 data class PixelPolygon(val points: List<PixelPoint>) {
     init {
         require(points.size >= 3) { "PixelPolygon must have at least three points" }
@@ -106,19 +112,57 @@ object TengenBevelGeometry {
         right: Int,
         bottom: Int,
         gutterPx: Int = 1,
+    ): TengenBevelParts = fromCell(
+        cell = PixelRect(left, top, right, bottom),
+        exposed = ExposedEdges.ALL,
+        gutterPx = gutterPx,
+    )
+
+    /**
+     * Builds bevel parts for one contiguous tetromino. Cells that share a
+     * logical edge do not get an inset, outline, or bevel on that edge. The
+     * caller draws all cell silhouettes first, then all faces and bevels, so
+     * shared edges are painted as one continuous shape.
+     */
+    fun fromCells(
+        cells: Iterable<TengenGridCell>,
+        gutterPx: Int = 1,
+    ): List<TengenBevelParts> {
+        val entries = cells.toList()
+        require(entries.isNotEmpty()) { "A joined Tengen piece needs at least one cell" }
+        val byCoordinate = entries.associateBy { it.coordinate }
+        require(byCoordinate.size == entries.size) { "Joined Tengen piece cells must be unique" }
+
+        return entries
+            .sortedWith(compareBy<TengenGridCell> { it.coordinate.y }.thenBy { it.coordinate.x })
+            .map { entry ->
+                val coordinate = entry.coordinate
+                fromCell(
+                    cell = entry.bounds,
+                    exposed = ExposedEdges(
+                        top = PixelPoint(coordinate.x, coordinate.y - 1) !in byCoordinate,
+                        left = PixelPoint(coordinate.x - 1, coordinate.y) !in byCoordinate,
+                        right = PixelPoint(coordinate.x + 1, coordinate.y) !in byCoordinate,
+                        bottom = PixelPoint(coordinate.x, coordinate.y + 1) !in byCoordinate,
+                    ),
+                    gutterPx = gutterPx,
+                )
+            }
+    }
+
+    private fun fromCell(
+        cell: PixelRect,
+        exposed: ExposedEdges,
+        gutterPx: Int,
     ): TengenBevelParts {
-        val cell = PixelRect(left, top, right, bottom)
         val gutter = gutterPx.coerceAtLeast(0)
-        val face = if (cell.width <= gutter * 2 || cell.height <= gutter * 2) {
-            cell
-        } else {
-            PixelRect(
-                left = cell.left + gutter,
-                top = cell.top + gutter,
-                right = cell.right - gutter,
-                bottom = cell.bottom - gutter,
-            )
-        }
+        val canInset = cell.width > gutter * 2 && cell.height > gutter * 2
+        val face = PixelRect(
+            left = cell.left + if (canInset && exposed.left) gutter else 0,
+            top = cell.top + if (canInset && exposed.top) gutter else 0,
+            right = cell.right - if (canInset && exposed.right) gutter else 0,
+            bottom = cell.bottom - if (canInset && exposed.bottom) gutter else 0,
+        )
         val maximumBevel = min(face.width / 3, face.height / 3)
         val targetBevel = max(1, (min(cell.width, cell.height) * 0.10f).roundToInt())
         val bevel = min(targetBevel, maximumBevel)
@@ -135,11 +179,34 @@ object TengenBevelGeometry {
             cell = cell,
             face = face,
             bevelPx = bevel,
-            top = polygon(l, t, r, t + bevel),
-            left = polygon(l, t + bevel, l + bevel, b),
-            right = polygon(r - bevel, t + bevel, r, b - bevel),
-            bottom = polygon(l + bevel, b - bevel, r, b),
+            top = if (exposed.top) polygon(l, t, r, t + bevel) else null,
+            left = if (exposed.left) {
+                polygon(l, t + if (exposed.top) bevel else 0, l + bevel, b - if (exposed.bottom) bevel else 0)
+            } else {
+                null
+            },
+            right = if (exposed.right) {
+                polygon(r - bevel, t + if (exposed.top) bevel else 0, r, b - if (exposed.bottom) bevel else 0)
+            } else {
+                null
+            },
+            bottom = if (exposed.bottom) {
+                polygon(l + if (exposed.left) bevel else 0, b - bevel, r - if (exposed.right) bevel else 0, b)
+            } else {
+                null
+            },
         )
+    }
+
+    private data class ExposedEdges(
+        val top: Boolean,
+        val left: Boolean,
+        val right: Boolean,
+        val bottom: Boolean,
+    ) {
+        companion object {
+            val ALL = ExposedEdges(top = true, left = true, right = true, bottom = true)
+        }
     }
 
     private fun polygon(left: Int, top: Int, right: Int, bottom: Int): PixelPolygon =
