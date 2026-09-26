@@ -54,6 +54,20 @@ class TengenBevelGeometryTest {
     }
 
     @Test
+    fun `joined tiny cells use the flat fallback without corner joins`() {
+        val parts = TengenBevelGeometry.fromCells(
+            listOf(
+                gridCell(1, 0, 2, 0, 4, 2),
+                gridCell(0, 1, 0, 2, 2, 4),
+                gridCell(1, 1, 2, 2, 4, 4),
+            ),
+        )
+
+        assertTrue(parts.all { it.isFlat })
+        assertTrue(parts.all { it.cornerPolygons.isEmpty() })
+    }
+
+    @Test
     fun `all Tengen ramps are fully opaque`() {
         TengenBevelPalette.ramps.values
             .flatMap { listOf(it.base, it.highlight, it.shadow) }
@@ -169,7 +183,7 @@ class TengenBevelGeometryTest {
     }
 
     @Test
-    fun `T notch gives both light corners an inward miter`() {
+    fun `T notch gets explicit chamfer joins with no local gap`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(1, 0, 40, 0, 80, 40),
@@ -179,16 +193,11 @@ class TengenBevelGeometryTest {
             ),
         )
 
-        val upper = parts.single { it.cell == PixelRect(40, 0, 80, 40) }
-        val lowerLeft = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
-
-        assertContainsPoint(upper.left, PixelPoint(48, 33))
-        assertContainsPoint(lowerLeft.top, PixelPoint(33, 48))
-        assertNoCrossCellPositiveAreaOverlap(parts)
+        assertConcaveChamfers(parts, listOf(PixelPoint(40, 40), PixelPoint(80, 40)))
     }
 
     @Test
-    fun `L notch joins a shadow right edge to a light top edge`() {
+    fun `L notch gets a complete mixed-color chamfer`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(0, 0, 0, 0, 40, 40),
@@ -198,16 +207,13 @@ class TengenBevelGeometryTest {
             ),
         )
 
-        val vertical = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
-        val foot = parts.single { it.cell == PixelRect(40, 80, 80, 120) }
-
-        assertContainsPoint(vertical.right, PixelPoint(32, 73))
-        assertContainsPoint(foot.top, PixelPoint(47, 88))
-        assertNoCrossCellPositiveAreaOverlap(parts)
+        assertConcaveChamfers(parts, listOf(PixelPoint(40, 80)))
+        assertTrue(parts.flatMap { it.cornerPolygons }.map { it.shade }.contains(TengenBevelShade.HIGHLIGHT))
+        assertTrue(parts.flatMap { it.cornerPolygons }.map { it.shade }.contains(TengenBevelShade.SHADOW))
     }
 
     @Test
-    fun `S and Z notches retain light and shadow orientation`() {
+    fun `S and Z notches are chamfered and fully joined`() {
         val s = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(1, 0, 40, 0, 80, 40),
@@ -216,11 +222,7 @@ class TengenBevelGeometryTest {
                 gridCell(1, 1, 40, 40, 80, 80),
             ),
         )
-        val sUpper = s.single { it.cell == PixelRect(40, 0, 80, 40) }
-        val sLowerLeft = s.single { it.cell == PixelRect(0, 40, 40, 80) }
-        assertContainsPoint(sUpper.left, PixelPoint(48, 33))
-        assertContainsPoint(sLowerLeft.top, PixelPoint(33, 48))
-        assertNoCrossCellPositiveAreaOverlap(s)
+        assertConcaveChamfers(s, listOf(PixelPoint(40, 40)))
 
         val z = TengenBevelGeometry.fromCells(
             listOf(
@@ -230,11 +232,7 @@ class TengenBevelGeometryTest {
                 gridCell(2, 1, 80, 40, 120, 80),
             ),
         )
-        val zUpperLeft = z.single { it.cell == PixelRect(0, 0, 40, 40) }
-        val zLowerMiddle = z.single { it.cell == PixelRect(40, 40, 80, 80) }
-        assertContainsPoint(zUpperLeft.bottom, PixelPoint(33, 32))
-        assertContainsPoint(zLowerMiddle.left, PixelPoint(48, 47))
-        assertNoCrossCellPositiveAreaOverlap(z)
+        assertConcaveChamfers(z, listOf(PixelPoint(40, 40)))
     }
 
     private fun assertNoPositiveAreaOverlap(polygons: List<PixelPolygon>) {
@@ -249,14 +247,32 @@ class TengenBevelGeometryTest {
     }
 
     private fun assertNoCrossCellPositiveAreaOverlap(parts: List<TengenBevelParts>) {
-        val polygons = parts.flatMap { it.edgePolygons }
+        val polygons = parts.flatMap { it.bevelPolygons }
         assertNoPositiveAreaOverlap(polygons)
     }
 
-    private fun assertContainsPoint(polygon: PixelPolygon?, expected: PixelPoint) {
-        assertNotNull("expected a bevel polygon containing $expected", polygon)
-        assertTrue("expected bevel polygon to contain $expected", expected in polygon!!.points)
+    private fun assertConcaveChamfers(parts: List<TengenBevelParts>, vertices: List<PixelPoint>) {
+        val edges = parts.flatMap { it.edgePolygons }
+        val corners = parts.flatMap { it.cornerPolygons }
+        assertTrue("expected explicit concave corner polygons", corners.isNotEmpty())
+        vertices.forEach { vertex ->
+            val joinsAtVertex = corners.filter { it.polygon.points.contains(vertex) }
+            assertTrue("missing chamfer at $vertex", joinsAtVertex.isNotEmpty())
+            joinsAtVertex.forEach { join ->
+                assertTrue("chamfer at $vertex must have an area", polygonArea2(join.polygon) > 0)
+                assertTrue(
+                    "chamfer at $vertex must touch an edge bevel: join=${join.polygon.points}",
+                    join.polygon.points.any { it in edges.flatMap { edge -> edge.points } },
+                )
+            }
+        }
+        assertNoCrossCellPositiveAreaOverlap(parts)
     }
+
+    private fun polygonArea2(polygon: PixelPolygon): Long = polygon.points
+        .zip(polygon.points.drop(1) + polygon.points.first())
+        .sumOf { (a, b) -> a.x.toLong() * b.y - b.x.toLong() * a.y }
+        .let { kotlin.math.abs(it) }
 
     /** Separating-axis test: shared edges/diagonals are allowed, filled overlap is not. */
     private fun polygonsHavePositiveAreaOverlap(first: PixelPolygon, second: PixelPolygon): Boolean {
