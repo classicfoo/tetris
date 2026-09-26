@@ -183,7 +183,7 @@ class TengenBevelGeometryTest {
     }
 
     @Test
-    fun `T notch overlaps adjoining bevels at inside miters`() {
+    fun `T notch joins adjacent bevels at inside miters`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(1, 0, 40, 0, 80, 40),
@@ -196,21 +196,20 @@ class TengenBevelGeometryTest {
         assertMiter(
             parts,
             miter = PixelPoint(48, 48),
-            expectedEndpoints = listOf(PixelPoint(49, 48), PixelPoint(48, 49)),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
         assertMiter(
             parts,
             miter = PixelPoint(72, 48),
-            expectedEndpoints = listOf(PixelPoint(71, 48), PixelPoint(72, 49)),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(80, 40, 120, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
+        assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
     @Test
-    fun `L notch overlaps mixed highlight and shadow at an inside miter`() {
+    fun `L notch joins mixed highlight and shadow at an inside miter`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(0, 0, 0, 0, 40, 40),
@@ -223,14 +222,14 @@ class TengenBevelGeometryTest {
         assertMiter(
             parts,
             miter = PixelPoint(32, 88),
-            expectedEndpoints = listOf(PixelPoint(31, 88), PixelPoint(32, 89)),
             adjacentCells = listOf(PixelRect(0, 40, 40, 80), PixelRect(40, 80, 80, 120)),
             diagonalFace = PixelRect(0, 80, 40, 120),
         )
+        assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
     @Test
-    fun `S and Z notches overlap at inside miter endpoints`() {
+    fun `S and Z notches join at exact inside miter endpoints`() {
         val s = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(1, 0, 40, 0, 80, 40),
@@ -242,10 +241,10 @@ class TengenBevelGeometryTest {
         assertMiter(
             s,
             miter = PixelPoint(48, 48),
-            expectedEndpoints = listOf(PixelPoint(49, 48), PixelPoint(48, 49)),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
+        assertNoCrossCellPositiveAreaOverlap(s)
 
         val z = TengenBevelGeometry.fromCells(
             listOf(
@@ -258,32 +257,10 @@ class TengenBevelGeometryTest {
         assertMiter(
             z,
             miter = PixelPoint(48, 32),
-            expectedEndpoints = listOf(PixelPoint(49, 32), PixelPoint(48, 31)),
             adjacentCells = listOf(PixelRect(0, 0, 40, 40), PixelRect(40, 40, 80, 80)),
             diagonalFace = PixelRect(40, 0, 80, 40),
         )
-    }
-
-    @Test
-    fun `all four concave corner orientations receive a one pixel overlap`() {
-        val shapes = listOf(
-            // Missing top-left.
-            listOf(gridCell(1, 0, 40, 0, 80, 40), gridCell(0, 1, 0, 40, 40, 80), gridCell(1, 1, 40, 40, 80, 80)),
-            // Missing top-right.
-            listOf(gridCell(0, 0, 0, 0, 40, 40), gridCell(0, 1, 0, 40, 40, 80), gridCell(1, 1, 40, 40, 80, 80)),
-            // Missing bottom-left.
-            listOf(gridCell(0, 0, 0, 0, 40, 40), gridCell(1, 0, 40, 0, 80, 40), gridCell(1, 1, 40, 40, 80, 80)),
-            // Missing bottom-right.
-            listOf(gridCell(0, 0, 0, 0, 40, 40), gridCell(1, 0, 40, 0, 80, 40), gridCell(0, 1, 0, 40, 40, 80)),
-        )
-
-        shapes.forEach { shape ->
-            val parts = TengenBevelGeometry.fromCells(shape)
-            assertEquals(2, parts.sumOf { it.overlapPoints.size })
-            assertEquals(2, parts.flatMap { it.edgePolygons }.count { polygon ->
-                polygon.points.any { point -> point in parts.flatMap { part -> part.overlapPoints } }
-            })
-        }
+        assertNoCrossCellPositiveAreaOverlap(z)
     }
 
     private fun assertNoPositiveAreaOverlap(polygons: List<PixelPolygon>) {
@@ -297,35 +274,28 @@ class TengenBevelGeometryTest {
         }
     }
 
+    private fun assertNoCrossCellPositiveAreaOverlap(parts: List<TengenBevelParts>) {
+        val polygons = parts.flatMap { it.edgePolygons }
+        assertNoPositiveAreaOverlap(polygons)
+    }
+
     private fun assertMiter(
         parts: List<TengenBevelParts>,
         miter: PixelPoint,
-        expectedEndpoints: List<PixelPoint>,
         adjacentCells: List<PixelRect>,
         diagonalFace: PixelRect,
     ) {
         assertEquals(2, adjacentCells.size)
-        assertEquals(2, expectedEndpoints.size)
-        val owners = parts.filter { part -> part.cell in adjacentCells }
-        assertEquals(adjacentCells.toSet(), owners.map { it.cell }.toSet())
+        val owners = parts.filter { part ->
+            part.cell in adjacentCells && part.edgePolygons.any { miter in it.points }
+        }
+        assertEquals("miter must be shared by both adjacent bevel faces", adjacentCells.toSet(), owners.map { it.cell }.toSet())
         assertEquals(
-            "the original touching vertex must be covered by the adjoining bevels",
-            0,
+            "miter must be a shared endpoint, not a filler polygon",
+            2,
             parts.flatMap { it.edgePolygons }.count { miter in it.points },
         )
-        expectedEndpoints.forEach { endpoint ->
-            assertTrue("overlap endpoint must land in the diagonal cell face", diagonalFace.contains(endpoint))
-            assertEquals(
-                "each overlap endpoint must belong to one adjacent bevel",
-                1,
-                owners.count { part -> part.edgePolygons.any { endpoint in it.points } },
-            )
-            assertEquals(
-                "each overlap endpoint must be marked for the overlap pass",
-                1,
-                owners.count { endpoint in it.overlapPoints },
-            )
-        }
+        assertTrue("miter must land in the diagonal cell face", diagonalFace.contains(miter))
     }
 
     /** Separating-axis test: shared edges/diagonals are allowed, filled overlap is not. */

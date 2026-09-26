@@ -74,9 +74,7 @@ object TengenBevelPalette {
 
 /**
  * Integer geometry for Tengen-style blocks. Joined cells share their base face,
- * while exposed bevel polygons overlap by one physical pixel at calculated
- * inside-miter joins. The overlap keeps Canvas's integer fill rules from
- * exposing the dark outline or base face at a concave corner.
+ * while exposed bevel polygons meet at calculated inside-miter endpoints.
  */
 data class TengenBevelParts(
     val cell: PixelRect,
@@ -86,8 +84,6 @@ data class TengenBevelParts(
     val left: PixelPolygon?,
     val right: PixelPolygon?,
     val bottom: PixelPolygon?,
-    /** Miter points whose adjoining bevel edges receive a one-pixel overlap pass. */
-    val overlapPoints: Set<PixelPoint> = emptySet(),
 ) {
     val isFlat: Boolean get() = bevelPx == 0
 
@@ -103,7 +99,6 @@ object TengenBevelGeometry {
      * bevel.
      */
     private const val BEVEL_RATIO = 0.18f
-    private const val MITER_OVERLAP_PX = 1
 
     fun fromFloat(
         left: Float,
@@ -175,7 +170,7 @@ object TengenBevelGeometry {
                 edge = adjustment.edge,
                 pointIndex = adjustment.pointIndex,
                 point = adjustment.miter,
-            ).withOverlapPoint(adjustment.miter)
+            )
         }
         return adjusted
     }
@@ -379,50 +374,17 @@ object TengenBevelGeometry {
                     coordinate = boundary.firstCoordinate,
                     edge = boundary.firstEdge,
                     pointIndex = boundary.firstPointIndex,
-                    miter = overlapMiter(miter, missing, first = true),
+                    miter = miter,
                 )
                 result += MiterAdjustment(
                     coordinate = boundary.secondCoordinate,
                     edge = boundary.secondEdge,
                     pointIndex = boundary.secondPointIndex,
-                    miter = overlapMiter(miter, missing, first = false),
+                    miter = miter,
                 )
             }
         }
         return result
-    }
-
-    /**
-     * Extend each of the two bevel faces one physical pixel into the
-     * diagonal cell. The first face owns the horizontal extension and the
-     * second owns the vertical extension; their fills therefore overlap at
-     * the join instead of merely touching at one rasterized vertex.
-     */
-    private fun overlapMiter(
-        miter: PixelPoint,
-        missing: CornerQuadrant,
-        first: Boolean,
-    ): PixelPoint = when (missing) {
-        CornerQuadrant.TOP_LEFT -> if (first) {
-            miter.copy(x = miter.x + MITER_OVERLAP_PX)
-        } else {
-            miter.copy(y = miter.y + MITER_OVERLAP_PX)
-        }
-        CornerQuadrant.TOP_RIGHT -> if (first) {
-            miter.copy(x = miter.x - MITER_OVERLAP_PX)
-        } else {
-            miter.copy(y = miter.y + MITER_OVERLAP_PX)
-        }
-        CornerQuadrant.BOTTOM_LEFT -> if (first) {
-            miter.copy(x = miter.x + MITER_OVERLAP_PX)
-        } else {
-            miter.copy(y = miter.y - MITER_OVERLAP_PX)
-        }
-        CornerQuadrant.BOTTOM_RIGHT -> if (first) {
-            miter.copy(x = miter.x - MITER_OVERLAP_PX)
-        } else {
-            miter.copy(y = miter.y - MITER_OVERLAP_PX)
-        }
     }
 
     private fun endpoint(polygon: PixelPolygon?, index: Int): PixelPoint? = polygon?.points?.getOrNull(index)
@@ -449,9 +411,6 @@ object TengenBevelGeometry {
         if (index !in points.indices) return this
         return copy(points = points.toMutableList().also { it[index] = point })
     }
-
-    private fun TengenBevelParts.withOverlapPoint(point: PixelPoint): TengenBevelParts =
-        copy(overlapPoints = overlapPoints + point)
 
     private fun polygon(vararg points: PixelPoint): PixelPolygon = PixelPolygon(points.toList())
 }
