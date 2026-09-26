@@ -559,12 +559,16 @@ class GameSurfaceView @JvmOverloads constructor(
             pixelPaint.color = ramp.base
             canvas.drawRect(part.face.toRectF(), pixelPaint)
         }
-        parts.forEach { part ->
-            drawPolygon(canvas, part.top, ramp.highlight)
-            drawPolygon(canvas, part.left, ramp.highlight)
-            drawPolygon(canvas, part.right, ramp.shadow)
-            drawPolygon(canvas, part.bottom, ramp.shadow)
-        }
+        drawCombinedPolygons(
+            canvas = canvas,
+            polygons = parts.flatMap { listOf(it.top, it.left) },
+            color = ramp.highlight,
+        )
+        drawCombinedPolygons(
+            canvas = canvas,
+            polygons = parts.flatMap { listOf(it.right, it.bottom) },
+            color = ramp.shadow,
+        )
         pixelPaint.alpha = 255
     }
 
@@ -638,28 +642,54 @@ class GameSurfaceView @JvmOverloads constructor(
             pixelPaint.color = ramp.base
             canvas.drawRect(parts.face.toRectF(), pixelPaint)
             if (palette.bevel && !parts.isFlat) {
-                drawPolygon(canvas, parts.top, ramp.highlight)
-                drawPolygon(canvas, parts.left, ramp.highlight)
-                drawPolygon(canvas, parts.right, ramp.shadow)
-                drawPolygon(canvas, parts.bottom, ramp.shadow)
+                drawCombinedPolygons(canvas, listOf(parts.top, parts.left), ramp.highlight)
+                drawCombinedPolygons(canvas, listOf(parts.right, parts.bottom), ramp.shadow)
             }
         }
         pixelPaint.alpha = 255
         pixelPaint.style = Paint.Style.FILL
     }
 
-    private fun drawPolygon(canvas: Canvas, polygon: PixelPolygon?, color: Int) {
-        if (polygon == null) return
-        val path = Path().apply {
-            moveTo(polygon.points.first().x.toFloat(), polygon.points.first().y.toFloat())
-            polygon.points.drop(1).forEach { point ->
-                lineTo(point.x.toFloat(), point.y.toFloat())
+    /**
+     * Draw one unioned path for a bevel shade. The individual edge polygons
+     * are inputs to the union only; Canvas receives one filled path, so a
+     * shared light or shadow corner cannot be rasterized as two competing
+     * polygons with a hairline between them.
+     */
+    private fun drawCombinedPolygons(
+        canvas: Canvas,
+        polygons: List<PixelPolygon?>,
+        color: Int,
+    ) {
+        val sourcePolygons = polygons.filterNotNull()
+        if (sourcePolygons.isEmpty()) return
+
+        val combined = Path().apply { fillType = Path.FillType.WINDING }
+        sourcePolygons.forEachIndexed { index, polygon ->
+            val next = Path().apply {
+                fillType = Path.FillType.WINDING
+                moveTo(polygon.points.first().x.toFloat(), polygon.points.first().y.toFloat())
+                polygon.points.drop(1).forEach { point ->
+                    lineTo(point.x.toFloat(), point.y.toFloat())
+                }
+                close()
             }
-            close()
+            if (index == 0) {
+                combined.set(next)
+            } else {
+                val union = Path()
+                if (union.op(combined, next, Path.Op.UNION)) {
+                    combined.set(union)
+                } else {
+                    // A union failure is exceptionally defensive; retaining
+                    // the contour still draws the complete authored bevel.
+                    combined.addPath(next)
+                }
+            }
         }
         pixelPaint.color = color
         pixelPaint.alpha = 255
-        canvas.drawPath(path, pixelPaint)
+        canvas.drawPath(combined, pixelPaint)
     }
 
     private fun snap(value: Float): Float = value.roundToInt().toFloat()
