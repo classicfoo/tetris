@@ -565,13 +565,6 @@ class GameSurfaceView @JvmOverloads constructor(
             drawPolygon(canvas, part.right, ramp.shadow)
             drawPolygon(canvas, part.bottom, ramp.shadow)
         }
-        parts.flatMap { it.cornerPolygons }.forEach { corner ->
-            drawPolygon(
-                canvas,
-                corner.polygon,
-                if (corner.shade == TengenBevelShade.HIGHLIGHT) ramp.highlight else ramp.shadow,
-            )
-        }
         pixelPaint.alpha = 255
     }
 

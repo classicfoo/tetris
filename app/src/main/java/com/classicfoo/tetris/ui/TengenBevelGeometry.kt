@@ -60,16 +60,6 @@ data class OpaqueColorRamp(
     }
 }
 
-enum class TengenBevelShade {
-    HIGHLIGHT,
-    SHADOW,
-}
-
-data class TengenCornerPolygon(
-    val polygon: PixelPolygon,
-    val shade: TengenBevelShade,
-)
-
 object TengenBevelPalette {
     val ramps: Map<com.classicfoo.tetris.engine.Tetromino, OpaqueColorRamp> = mapOf(
         com.classicfoo.tetris.engine.Tetromino.I to OpaqueColorRamp(0xFF23AFC4.toInt(), 0xFF75DFE1.toInt(), 0xFF0F506B.toInt()),
@@ -83,8 +73,8 @@ object TengenBevelPalette {
 }
 
 /**
- * Integer geometry for a Tengen-style block. The four edge polygons deliberately
- * own separate corner regions, so no highlight or shadow strip is drawn twice.
+ * Integer geometry for Tengen-style blocks. Joined cells share their base face,
+ * while exposed bevel polygons meet at calculated inside-miter endpoints.
  */
 data class TengenBevelParts(
     val cell: PixelRect,
@@ -94,15 +84,11 @@ data class TengenBevelParts(
     val left: PixelPolygon?,
     val right: PixelPolygon?,
     val bottom: PixelPolygon?,
-    val cornerPolygons: List<TengenCornerPolygon> = emptyList(),
 ) {
     val isFlat: Boolean get() = bevelPx == 0
 
     val edgePolygons: List<PixelPolygon>
         get() = listOfNotNull(top, left, right, bottom)
-
-    val bevelPolygons: List<PixelPolygon>
-        get() = edgePolygons + cornerPolygons.map { it.polygon }
 }
 
 object TengenBevelGeometry {
@@ -176,14 +162,17 @@ object TengenBevelGeometry {
             .map { it.coordinate }
             .zip(parts)
             .toMap()
-        val joins = concaveCornerJoins(byCoordinate, partsByCoordinate)
-        return sortedEntries.mapIndexed { index, entry ->
-            parts[index].copy(
-                cornerPolygons = joins
-                    .filter { it.targetCoordinate == entry.coordinate }
-                    .flatMap { it.polygons },
+        val indexByCoordinate = sortedEntries.mapIndexed { index, entry -> entry.coordinate to index }.toMap()
+        val adjusted = parts.toMutableList()
+        concaveMiterAdjustments(byCoordinate, partsByCoordinate).forEach { adjustment ->
+            val index = indexByCoordinate[adjustment.coordinate] ?: return@forEach
+            adjusted[index] = adjusted[index].withEdgePoint(
+                edge = adjustment.edge,
+                pointIndex = adjustment.pointIndex,
+                point = adjustment.miter,
             )
         }
+        return adjusted
     }
 
     private fun fromCell(
@@ -280,20 +269,34 @@ object TengenBevelGeometry {
         BOTTOM_RIGHT,
     }
 
-    private data class ConcaveCornerJoin(
-        val vertex: PixelPoint,
-        val missing: CornerQuadrant,
-        val targetCoordinate: PixelPoint,
-        val firstPoint: PixelPoint,
-        val secondPoint: PixelPoint,
-        val polygons: List<TengenCornerPolygon>,
+    private enum class Edge {
+        TOP,
+        LEFT,
+        RIGHT,
+        BOTTOM,
+    }
+
+    private data class MiterAdjustment(
+        val coordinate: PixelPoint,
+        val edge: Edge,
+        val pointIndex: Int,
+        val miter: PixelPoint,
     )
 
-    private fun concaveCornerJoins(
+    private data class MiterBoundary(
+        val firstCoordinate: PixelPoint,
+        val firstEdge: Edge,
+        val firstPointIndex: Int,
+        val secondCoordinate: PixelPoint,
+        val secondEdge: Edge,
+        val secondPointIndex: Int,
+    )
+
+    private fun concaveMiterAdjustments(
         occupied: Map<PixelPoint, TengenGridCell>,
         partsByCoordinate: Map<PixelPoint, TengenBevelParts>,
-    ): List<ConcaveCornerJoin> {
-        val result = mutableListOf<ConcaveCornerJoin>()
+    ): List<MiterAdjustment> {
+        val result = mutableListOf<MiterAdjustment>()
         val minX = occupied.keys.minOf { it.x }
         val maxX = occupied.keys.maxOf { it.x }
         val minY = occupied.keys.minOf { it.y }
@@ -316,70 +319,68 @@ object TengenBevelGeometry {
                     CornerQuadrant.BOTTOM_LEFT -> CornerQuadrant.TOP_RIGHT
                     CornerQuadrant.BOTTOM_RIGHT -> CornerQuadrant.TOP_LEFT
                 }
-                val targetCell = quadrants.getValue(diagonal) ?: continue
-                val targetCoordinate = targetCell.coordinate
-                val vertex = PixelPoint(
-                    x = if (quadrants[CornerQuadrant.TOP_RIGHT] != null || quadrants[CornerQuadrant.BOTTOM_RIGHT] != null) {
-                        targetCell.bounds.right.takeIf { targetCell.coordinate.x < vertexX } ?:
-                            quadrants.values.filterNotNull().first { it.coordinate.x >= vertexX }.bounds.left
-                    } else {
-                        quadrants.values.filterNotNull().first { it.coordinate.x < vertexX }.bounds.right
-                    },
-                    y = if (quadrants[CornerQuadrant.BOTTOM_LEFT] != null || quadrants[CornerQuadrant.BOTTOM_RIGHT] != null) {
-                        quadrants.values.filterNotNull().first { it.coordinate.y >= vertexY }.bounds.top
-                    } else {
-                        quadrants.values.filterNotNull().first { it.coordinate.y < vertexY }.bounds.bottom
-                    },
+                quadrants.getValue(diagonal) ?: continue
+                val boundary = when (missing) {
+                    CornerQuadrant.TOP_LEFT -> MiterBoundary(
+                        firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate,
+                        firstEdge = Edge.LEFT,
+                        firstPointIndex = 2,
+                        secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate,
+                        secondEdge = Edge.TOP,
+                        secondPointIndex = 2,
+                    )
+                    CornerQuadrant.TOP_RIGHT -> MiterBoundary(
+                        firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate,
+                        firstEdge = Edge.RIGHT,
+                        firstPointIndex = 2,
+                        secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate,
+                        secondEdge = Edge.TOP,
+                        secondPointIndex = 3,
+                    )
+                    CornerQuadrant.BOTTOM_LEFT -> MiterBoundary(
+                        firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate,
+                        firstEdge = Edge.BOTTOM,
+                        firstPointIndex = 2,
+                        secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate,
+                        secondEdge = Edge.LEFT,
+                        secondPointIndex = 1,
+                    )
+                    CornerQuadrant.BOTTOM_RIGHT -> MiterBoundary(
+                        firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate,
+                        firstEdge = Edge.BOTTOM,
+                        firstPointIndex = 3,
+                        secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate,
+                        secondEdge = Edge.RIGHT,
+                        secondPointIndex = 3,
+                    )
+                }
+                val firstPoint = endpoint(
+                    partsByCoordinate[boundary.firstCoordinate]?.edge(boundary.firstEdge),
+                    boundary.firstPointIndex,
+                ) ?: continue
+                val secondPoint = endpoint(
+                    partsByCoordinate[boundary.secondCoordinate]?.edge(boundary.secondEdge),
+                    boundary.secondPointIndex,
+                ) ?: continue
+                val miter = when (missing) {
+                    CornerQuadrant.TOP_LEFT,
+                    CornerQuadrant.TOP_RIGHT,
+                    -> PixelPoint(firstPoint.x, secondPoint.y)
+                    CornerQuadrant.BOTTOM_LEFT,
+                    CornerQuadrant.BOTTOM_RIGHT,
+                    -> PixelPoint(secondPoint.x, firstPoint.y)
+                }
+                result += MiterAdjustment(
+                    coordinate = boundary.firstCoordinate,
+                    edge = boundary.firstEdge,
+                    pointIndex = boundary.firstPointIndex,
+                    miter = miter,
                 )
-                val (firstPoint, secondPoint, firstShade, secondShade) = when (missing) {
-                    CornerQuadrant.TOP_LEFT -> QuadJoin(
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate]?.left, 2) ?: continue,
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate]?.top, 2) ?: continue,
-                        TengenBevelShade.HIGHLIGHT,
-                        TengenBevelShade.HIGHLIGHT,
-                    )
-                    CornerQuadrant.TOP_RIGHT -> QuadJoin(
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate]?.right, 2) ?: continue,
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate]?.top, 3) ?: continue,
-                        TengenBevelShade.SHADOW,
-                        TengenBevelShade.HIGHLIGHT,
-                    )
-                    CornerQuadrant.BOTTOM_LEFT -> QuadJoin(
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate]?.bottom, 2) ?: continue,
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate]?.left, 1) ?: continue,
-                        TengenBevelShade.SHADOW,
-                        TengenBevelShade.HIGHLIGHT,
-                    )
-                    CornerQuadrant.BOTTOM_RIGHT -> QuadJoin(
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.TOP_RIGHT)!!.coordinate]?.bottom, 3) ?: continue,
-                        endpoint(partsByCoordinate[quadrants.getValue(CornerQuadrant.BOTTOM_LEFT)!!.coordinate]?.right, 3) ?: continue,
-                        TengenBevelShade.SHADOW,
-                        TengenBevelShade.SHADOW,
-                    )
-                }
-                val joins = if (firstShade == secondShade) {
-                    listOf(TengenCornerPolygon(polygon(firstPoint, vertex, secondPoint), firstShade))
-                } else {
-                    val midpoint = PixelPoint(
-                        (firstPoint.x + secondPoint.x) / 2,
-                        (firstPoint.y + secondPoint.y) / 2,
-                    )
-                    if (midpoint == firstPoint || midpoint == secondPoint) {
-                        listOf(TengenCornerPolygon(polygon(firstPoint, vertex, secondPoint), firstShade))
-                    } else {
-                        listOf(
-                            TengenCornerPolygon(polygon(firstPoint, vertex, midpoint), firstShade),
-                            TengenCornerPolygon(polygon(midpoint, vertex, secondPoint), secondShade),
-                        )
-                    }
-                }
-                result += ConcaveCornerJoin(
-                    vertex = vertex,
-                    missing = missing,
-                    targetCoordinate = targetCoordinate,
-                    firstPoint = firstPoint,
-                    secondPoint = secondPoint,
-                    polygons = joins,
+                result += MiterAdjustment(
+                    coordinate = boundary.secondCoordinate,
+                    edge = boundary.secondEdge,
+                    pointIndex = boundary.secondPointIndex,
+                    miter = miter,
                 )
             }
         }
@@ -388,12 +389,28 @@ object TengenBevelGeometry {
 
     private fun endpoint(polygon: PixelPolygon?, index: Int): PixelPoint? = polygon?.points?.getOrNull(index)
 
-    private data class QuadJoin(
-        val firstPoint: PixelPoint,
-        val secondPoint: PixelPoint,
-        val firstShade: TengenBevelShade,
-        val secondShade: TengenBevelShade,
-    )
+    private fun TengenBevelParts.edge(edge: Edge): PixelPolygon? = when (edge) {
+        Edge.TOP -> top
+        Edge.LEFT -> left
+        Edge.RIGHT -> right
+        Edge.BOTTOM -> bottom
+    }
+
+    private fun TengenBevelParts.withEdgePoint(
+        edge: Edge,
+        pointIndex: Int,
+        point: PixelPoint,
+    ): TengenBevelParts = when (edge) {
+        Edge.TOP -> copy(top = top?.replacePoint(pointIndex, point))
+        Edge.LEFT -> copy(left = left?.replacePoint(pointIndex, point))
+        Edge.RIGHT -> copy(right = right?.replacePoint(pointIndex, point))
+        Edge.BOTTOM -> copy(bottom = bottom?.replacePoint(pointIndex, point))
+    }
+
+    private fun PixelPolygon.replacePoint(index: Int, point: PixelPoint): PixelPolygon {
+        if (index !in points.indices) return this
+        return copy(points = points.toMutableList().also { it[index] = point })
+    }
 
     private fun polygon(vararg points: PixelPoint): PixelPolygon = PixelPolygon(points.toList())
 }
