@@ -27,7 +27,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             GameAction.RotateClockwise -> rotate(clockwise = true)
             GameAction.RotateCounterClockwise -> rotate(clockwise = false)
             GameAction.Hold -> hold()
-            GameAction.Pause -> if (state.status == GameStatus.RUNNING) {
+            GameAction.Pause -> if (state.status == GameStatus.RUNNING && !state.isClearing) {
                 state = state.copy(status = GameStatus.PAUSED, lastEvent = GameEvent.PAUSE)
             }
             GameAction.Resume -> if (state.status == GameStatus.PAUSED) {
@@ -35,7 +35,9 @@ class GameEngine(seed: Long = System.nanoTime()) {
             }
             is GameAction.Tick -> tick(action.millis)
         }
-        state = state.copy(ghostY = BoardRules.ghostY(state.board, state.current))
+        state = state.copy(
+            ghostY = if (state.isClearing) BOARD_HEIGHT else BoardRules.ghostY(state.board, state.current),
+        )
         return state
     }
 
@@ -81,7 +83,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun move(dx: Int) {
-        if (state.status != GameStatus.RUNNING) return
+        if (state.status != GameStatus.RUNNING || state.isClearing) return
         val grounded = !BoardRules.canPlace(state.board, state.current.copy(y = state.current.y + 1))
         val candidate = state.current.copy(x = state.current.x + dx)
         if (!BoardRules.canPlace(state.board, candidate)) return
@@ -95,7 +97,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun rotate(clockwise: Boolean) {
-        if (state.status != GameStatus.RUNNING) return
+        if (state.status != GameStatus.RUNNING || state.isClearing) return
         val from = state.current.rotation
         val to = if (clockwise) from.clockwise() else from.counterClockwise()
         val grounded = !BoardRules.canPlace(state.board, state.current.copy(y = state.current.y + 1))
@@ -119,7 +121,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun softDrop() {
-        if (state.status != GameStatus.RUNNING) return
+        if (state.status != GameStatus.RUNNING || state.isClearing) return
         val candidate = state.current.copy(y = state.current.y + 1)
         if (BoardRules.canPlace(state.board, candidate)) {
             state = state.copy(current = candidate, score = state.score + 1, lastEvent = GameEvent.SOFT_DROP)
@@ -128,7 +130,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun hardDrop() {
-        if (state.status != GameStatus.RUNNING) return
+        if (state.status != GameStatus.RUNNING || state.isClearing) return
         val distance = BoardRules.ghostY(state.board, state.current) - state.current.y
         state = state.copy(
             current = state.current.copy(y = state.current.y + distance),
@@ -139,7 +141,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun hold() {
-        if (state.status != GameStatus.RUNNING || state.holdUsed) return
+        if (state.status != GameStatus.RUNNING || state.isClearing || state.holdUsed) return
         val nextCurrent = state.hold?.let(::spawn) ?: spawn(state.next.first())
         val nextQueue = if (state.hold == null) {
             state.next.drop(1) + bag.next()
@@ -160,6 +162,10 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun tick(millis: Long) {
+        if (state.isClearing) {
+            advanceClear(millis)
+            return
+        }
         if (state.status != GameStatus.RUNNING) return
         val elapsed = millis.coerceIn(0, 1_000)
         fallAccumulatorMs += elapsed
@@ -190,11 +196,55 @@ class GameEngine(seed: Long = System.nanoTime()) {
         val pieceId = nextPieceId()
         val locked = BoardRules.lock(state.board, state.current)
         val lockedPieceIds = BoardRules.lockPieceIds(state.boardPieceIds, state.current, pieceId)
+        val lineRows = BoardRules.clearLinesWithRows(locked)
+        val linesCleared = lineRows.count
+        if (linesCleared > 0) {
+            clearSequenceCounter++
+            state = state.copy(
+                // Keep the locked, completed rows intact for the flash animation.
+                board = locked,
+                boardPieceIds = lockedPieceIds,
+                // The old active piece is already represented by the locked board.
+                // Keep current off-board so existing renderers cannot draw it twice.
+                current = state.current.copy(y = BOARD_HEIGHT),
+                ghostY = BOARD_HEIGHT,
+                isClearing = true,
+                clearElapsedMs = 0L,
+                clearSequence = clearSequenceCounter,
+                lastEvent = GameEvent.LINE_CLEAR,
+                lastLines = linesCleared,
+                lastClearedRows = lineRows.clearedRows,
+                lastScoreDelta = 0L,
+                lastTSpin = tSpin,
+                perfectClear = false,
+            )
+            resetLockState()
+            return
+        }
+
         val clearResult = BoardRules.clearLinesWithPieceIds(locked, lockedPieceIds)
+        commitLockedPiece(clearResult, tSpin)
+    }
+
+    private fun advanceClear(millis: Long) {
+        val elapsed = millis.coerceIn(0L, 1_000L)
+        val nextElapsed = state.clearElapsedMs + elapsed
+        if (nextElapsed < CLEAR_DURATION_MS) {
+            state = state.copy(clearElapsedMs = nextElapsed)
+        } else {
+            val clearResult = BoardRules.clearLinesWithPieceIds(state.board, state.boardPieceIds)
+            commitLockedPiece(clearResult, state.lastTSpin)
+        }
+    }
+
+    private fun commitLockedPiece(
+        clearResult: BoardRules.LineClearWithPieceIdsResult,
+        tSpin: TSpinKind,
+    ) {
         val clearedBoard = clearResult.board
         val clearedBoardPieceIds = clearResult.boardPieceIds
         val linesCleared = clearResult.count
-        if (linesCleared > 0) clearSequenceCounter++
+        val clearRows = clearResult.clearedRows
         val perfectClear = linesCleared > 0 && BoardRules.isEmpty(clearedBoard)
         val difficult = (tSpin != TSpinKind.NONE && linesCleared > 0) || linesCleared == 4
         val delta = Scoring.scoreDelta(
@@ -231,6 +281,8 @@ class GameEngine(seed: Long = System.nanoTime()) {
             combo = combo,
             backToBack = backToBack,
             status = if (gameOver) GameStatus.GAME_OVER else GameStatus.RUNNING,
+            isClearing = false,
+            clearElapsedMs = 0L,
             clearSequence = clearSequenceCounter,
             lastEvent = when {
                 gameOver -> GameEvent.GAME_OVER
@@ -240,11 +292,15 @@ class GameEngine(seed: Long = System.nanoTime()) {
                 else -> GameEvent.LAND
             },
             lastLines = linesCleared,
-            lastClearedRows = clearResult.clearedRows,
+            lastClearedRows = if (linesCleared > 0) clearRows else emptyList(),
             lastScoreDelta = delta,
             lastTSpin = tSpin,
             perfectClear = perfectClear,
         )
+        resetLockState()
+    }
+
+    private fun resetLockState() {
         fallAccumulatorMs = 0
         lockElapsedMs = 0
         lockResets = 0
@@ -296,6 +352,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
 
     companion object {
         const val LOCK_DELAY_MS = 500L
+        const val CLEAR_DURATION_MS = 500L
         const val MAX_LOCK_RESETS = 15
 
         private val JLSTZ_KICKS = mapOf(

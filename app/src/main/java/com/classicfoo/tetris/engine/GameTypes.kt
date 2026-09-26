@@ -64,6 +64,10 @@ data class GameState(
     val backToBack: Boolean,
     val status: GameStatus,
     val ghostY: Int,
+    /** True while completed rows remain visible before the engine compacts them. */
+    val isClearing: Boolean = false,
+    /** Elapsed time in the staged line-clear interval. */
+    val clearElapsedMs: Long = 0L,
     val lastEvent: GameEvent = GameEvent.NONE,
     val lastLines: Int = 0,
     val clearSequence: Long = 0L,
