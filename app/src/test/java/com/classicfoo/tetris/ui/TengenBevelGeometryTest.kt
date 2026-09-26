@@ -169,7 +169,7 @@ class TengenBevelGeometryTest {
     }
 
     @Test
-    fun `T notch keeps light and shadow joins orthogonal`() {
+    fun `T notch gives both light corners an inward miter`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
                 gridCell(1, 0, 40, 0, 80, 40),
@@ -182,8 +182,8 @@ class TengenBevelGeometryTest {
         val upper = parts.single { it.cell == PixelRect(40, 0, 80, 40) }
         val lowerLeft = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
 
-        assertContainsPoint(upper.left, PixelPoint(48, 40))
-        assertContainsPoint(lowerLeft.top, PixelPoint(40, 48))
+        assertContainsPoint(upper.left, PixelPoint(48, 33))
+        assertContainsPoint(lowerLeft.top, PixelPoint(33, 48))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -201,8 +201,8 @@ class TengenBevelGeometryTest {
         val vertical = parts.single { it.cell == PixelRect(0, 40, 40, 80) }
         val foot = parts.single { it.cell == PixelRect(40, 80, 80, 120) }
 
-        assertContainsPoint(vertical.right, PixelPoint(32, 80))
-        assertContainsPoint(foot.top, PixelPoint(40, 88))
+        assertContainsPoint(vertical.right, PixelPoint(32, 73))
+        assertContainsPoint(foot.top, PixelPoint(47, 88))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -218,8 +218,8 @@ class TengenBevelGeometryTest {
         )
         val sUpper = s.single { it.cell == PixelRect(40, 0, 80, 40) }
         val sLowerLeft = s.single { it.cell == PixelRect(0, 40, 40, 80) }
-        assertContainsPoint(sUpper.left, PixelPoint(48, 40))
-        assertContainsPoint(sLowerLeft.top, PixelPoint(40, 48))
+        assertContainsPoint(sUpper.left, PixelPoint(48, 33))
+        assertContainsPoint(sLowerLeft.top, PixelPoint(33, 48))
         assertNoCrossCellPositiveAreaOverlap(s)
 
         val z = TengenBevelGeometry.fromCells(
@@ -232,8 +232,8 @@ class TengenBevelGeometryTest {
         )
         val zUpperLeft = z.single { it.cell == PixelRect(0, 0, 40, 40) }
         val zLowerMiddle = z.single { it.cell == PixelRect(40, 40, 80, 80) }
-        assertContainsPoint(zUpperLeft.bottom, PixelPoint(40, 32))
-        assertContainsPoint(zLowerMiddle.left, PixelPoint(48, 40))
+        assertContainsPoint(zUpperLeft.bottom, PixelPoint(33, 32))
+        assertContainsPoint(zLowerMiddle.left, PixelPoint(48, 47))
         assertNoCrossCellPositiveAreaOverlap(z)
     }
 
