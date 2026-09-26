@@ -10,8 +10,8 @@ android {
         applicationId = "com.classicfoo.tetris"
         minSdk = 24
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 16
+        versionName = "1.0.15"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
