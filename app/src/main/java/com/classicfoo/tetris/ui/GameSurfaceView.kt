@@ -546,29 +546,16 @@ class GameSurfaceView @JvmOverloads constructor(
         palette: Palette,
     ) {
         val ramp = palette.ramp(type)
-        val parts = TengenBevelGeometry.fromCells(cells)
+        val surface = TengenPieceSurfaceGeometry.fromCells(cells)
         pixelPaint.style = Paint.Style.FILL
         pixelPaint.alpha = 255
 
-        // Paint the silhouette first. Internal cell edges are covered by the
-        // joined faces below, while the exposed one-pixel outline remains.
-        pixelPaint.color = palette.pixelOutline
-        parts.forEach { part -> canvas.drawRect(part.cell.toRectF(), pixelPaint) }
-
-        parts.forEach { part ->
-            pixelPaint.color = ramp.base
-            canvas.drawRect(part.face.toRectF(), pixelPaint)
-        }
-        drawCombinedPolygons(
-            canvas = canvas,
-            polygons = parts.flatMap { listOf(it.top, it.left) },
-            color = ramp.highlight,
-        )
-        drawCombinedPolygons(
-            canvas = canvas,
-            polygons = parts.flatMap { listOf(it.right, it.bottom) },
-            color = ramp.shadow,
-        )
+        // Draw the complete tetromino surface first. Its bevel bands come
+        // from the traced outer silhouette, not from four independent cell
+        // edge polygons.
+        drawSurfaceRects(canvas, surface.silhouetteRects, palette.pixelOutline)
+        drawSurfaceRects(canvas, surface.faceRects, ramp.base)
+        drawSurfaceBevels(canvas, surface, ramp)
         pixelPaint.alpha = 255
     }
 
@@ -642,8 +629,10 @@ class GameSurfaceView @JvmOverloads constructor(
             pixelPaint.color = ramp.base
             canvas.drawRect(parts.face.toRectF(), pixelPaint)
             if (palette.bevel && !parts.isFlat) {
-                drawCombinedPolygons(canvas, listOf(parts.top, parts.left), ramp.highlight)
-                drawCombinedPolygons(canvas, listOf(parts.right, parts.bottom), ramp.shadow)
+                val surface = TengenPieceSurfaceGeometry.fromCells(
+                    listOf(TengenGridCell(PixelPoint(0, 0), parts.cell)),
+                )
+                drawSurfaceBevels(canvas, surface, ramp)
             }
         }
         pixelPaint.alpha = 255
@@ -651,45 +640,60 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Draw one unioned path for a bevel shade. The individual edge polygons
-     * are inputs to the union only; Canvas receives one filled path, so a
-     * shared light or shadow corner cannot be rasterized as two competing
-     * polygons with a hairline between them.
+     * Draw all rectangles in one path. There is no stroke on this path, so
+     * adjacent cell contours become one opaque silhouette or face.
      */
-    private fun drawCombinedPolygons(
+    private fun drawSurfaceRects(
         canvas: Canvas,
-        polygons: List<PixelPolygon?>,
+        rects: List<PixelRect>,
         color: Int,
     ) {
-        val sourcePolygons = polygons.filterNotNull()
-        if (sourcePolygons.isEmpty()) return
-
-        val combined = Path().apply { fillType = Path.FillType.WINDING }
-        sourcePolygons.forEachIndexed { index, polygon ->
-            val next = Path().apply {
-                fillType = Path.FillType.WINDING
-                moveTo(polygon.points.first().x.toFloat(), polygon.points.first().y.toFloat())
-                polygon.points.drop(1).forEach { point ->
-                    lineTo(point.x.toFloat(), point.y.toFloat())
-                }
-                close()
-            }
-            if (index == 0) {
-                combined.set(next)
-            } else {
-                val union = Path()
-                if (union.op(combined, next, Path.Op.UNION)) {
-                    combined.set(union)
-                } else {
-                    // A union failure is exceptionally defensive; retaining
-                    // the contour still draws the complete authored bevel.
-                    combined.addPath(next)
-                }
-            }
+        if (rects.isEmpty()) return
+        val path = Path().apply { fillType = Path.FillType.WINDING }
+        rects.forEach { rect ->
+            path.addRect(rect.toRectF(), Path.Direction.CW)
         }
         pixelPaint.color = color
         pixelPaint.alpha = 255
-        canvas.drawPath(combined, pixelPaint)
+        canvas.drawPath(path, pixelPaint)
+    }
+
+    private fun drawSurfaceBevels(
+        canvas: Canvas,
+        surface: TengenPieceSurface,
+        ramp: OpaqueColorRamp,
+    ) {
+        drawSurfaceBands(
+            canvas = canvas,
+            bands = surface.bands.filter { it.shade == TengenSurfaceShade.HIGHLIGHT },
+            color = ramp.highlight,
+        )
+        drawSurfaceBands(
+            canvas = canvas,
+            bands = surface.bands.filter { it.shade == TengenSurfaceShade.SHADOW },
+            color = ramp.shadow,
+        )
+    }
+
+    /** Draw one path containing the already-traced large bevel bands. */
+    private fun drawSurfaceBands(
+        canvas: Canvas,
+        bands: List<TengenSurfaceBand>,
+        color: Int,
+    ) {
+        if (bands.isEmpty()) return
+        val path = Path().apply { fillType = Path.FillType.WINDING }
+        bands.forEach { band ->
+            val polygon = band.polygon
+            path.moveTo(polygon.points.first().x.toFloat(), polygon.points.first().y.toFloat())
+            polygon.points.drop(1).forEach { point ->
+                path.lineTo(point.x.toFloat(), point.y.toFloat())
+            }
+            path.close()
+        }
+        pixelPaint.color = color
+        pixelPaint.alpha = 255
+        canvas.drawPath(path, pixelPaint)
     }
 
     private fun snap(value: Float): Float = value.roundToInt().toFloat()
