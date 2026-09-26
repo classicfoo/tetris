@@ -565,6 +565,16 @@ class GameSurfaceView @JvmOverloads constructor(
             drawPolygon(canvas, part.right, ramp.shadow)
             drawPolygon(canvas, part.bottom, ramp.shadow)
         }
+        // Fill the miter joins a physical pixel beyond their shared endpoint.
+        // This is intentionally a second pass: whichever bevel is painted
+        // last still covers the integer-raster seam instead of exposing the
+        // dark silhouette or the base face beneath it.
+        parts.forEach { part ->
+            drawPolygonOverlap(canvas, part.top, ramp.highlight, part.overlapPoints)
+            drawPolygonOverlap(canvas, part.left, ramp.highlight, part.overlapPoints)
+            drawPolygonOverlap(canvas, part.right, ramp.shadow, part.overlapPoints)
+            drawPolygonOverlap(canvas, part.bottom, ramp.shadow, part.overlapPoints)
+        }
         pixelPaint.alpha = 255
     }
 
@@ -660,6 +670,32 @@ class GameSurfaceView @JvmOverloads constructor(
         pixelPaint.color = color
         pixelPaint.alpha = 255
         canvas.drawPath(path, pixelPaint)
+    }
+
+    private fun drawPolygonOverlap(
+        canvas: Canvas,
+        polygon: PixelPolygon?,
+        color: Int,
+        overlapPoints: Set<PixelPoint>,
+    ) {
+        if (polygon == null || overlapPoints.isEmpty()) return
+        val indices = polygon.points.indices.filter { polygon.points[it] in overlapPoints }
+        if (indices.isEmpty()) return
+
+        pixelPaint.style = Paint.Style.STROKE
+        pixelPaint.strokeWidth = 2f
+        pixelPaint.strokeCap = Paint.Cap.SQUARE
+        pixelPaint.strokeJoin = Paint.Join.MITER
+        pixelPaint.color = color
+        indices.forEach { index ->
+            val point = polygon.points[index]
+            val previous = polygon.points[(index - 1 + polygon.points.size) % polygon.points.size]
+            val next = polygon.points[(index + 1) % polygon.points.size]
+            canvas.drawLine(previous.x.toFloat(), previous.y.toFloat(), point.x.toFloat(), point.y.toFloat(), pixelPaint)
+            canvas.drawLine(point.x.toFloat(), point.y.toFloat(), next.x.toFloat(), next.y.toFloat(), pixelPaint)
+        }
+        pixelPaint.strokeWidth = 1f
+        pixelPaint.style = Paint.Style.FILL
     }
 
     private fun snap(value: Float): Float = value.roundToInt().toFloat()
