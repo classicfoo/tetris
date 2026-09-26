@@ -21,26 +21,26 @@ class ClearFlashControllerTest {
         )
         val tick = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 124L,
+            nowMs = 200L,
         )
 
         assertTrue(start.active)
         assertEquals(listOf(17, 18, 19), start.rows)
-        assertEquals(56, start.alpha)
-        assertEquals(27, tick.alpha)
+        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, start.alpha)
+        assertTrue(tick.alpha in 1 until start.alpha)
         assertTrue(tick.alpha < start.alpha)
 
         val secondFlash = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 184L,
+            nowMs = 434L,
         )
         val thirdFlash = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 268L,
+            nowMs = 768L,
         )
 
-        assertEquals(56, secondFlash.alpha)
-        assertEquals(56, thirdFlash.alpha)
+        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, secondFlash.alpha)
+        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, thirdFlash.alpha)
     }
 
     @Test
@@ -50,12 +50,12 @@ class ClearFlashControllerTest {
         controller.observe(state(0), nowMs = 0L)
         controller.observe(state(1, rows = listOf(19)), nowMs = 10L)
 
-        val darkBeat = controller.observe(state(1, rows = listOf(19)), nowMs = 58L)
+        val darkBeat = controller.observe(state(1, rows = listOf(19)), nowMs = 300L)
         assertFalse(darkBeat.active)
         assertEquals(0, darkBeat.alpha)
         assertEquals(listOf(19), darkBeat.rows)
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 262L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 1_010L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 1_010L).active)
     }
 
     @Test
@@ -103,7 +103,7 @@ class ClearFlashControllerTest {
 
         assertEquals(listOf(16, 17, 18, 19), tetris.rows)
         assertEquals(listOf(19), perfectClear.rows)
-        assertEquals(56, perfectClear.alpha)
+        assertEquals(ClearFlashController.DEFAULT_MAX_ALPHA, perfectClear.alpha)
     }
 
     private fun state(

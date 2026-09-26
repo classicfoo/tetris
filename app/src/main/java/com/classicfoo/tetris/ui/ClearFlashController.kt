@@ -21,9 +21,9 @@ class ClearFlashController(
     private val maxAlpha: Int = DEFAULT_MAX_ALPHA,
 ) {
     companion object {
-        /** A little over a quarter second gives the clear room to read as three flashes. */
-        const val DEFAULT_DURATION_MS: Long = 252L
-        const val DEFAULT_MAX_ALPHA: Int = 56
+        /** A full second gives the player time to register the clear and accolade. */
+        const val DEFAULT_DURATION_MS: Long = 1_000L
+        const val DEFAULT_MAX_ALPHA: Int = 160
 
         private const val PULSE_COUNT = 3
         /** Each flash fades out before the next one begins, leaving a clear dark beat. */
@@ -35,8 +35,8 @@ class ClearFlashController(
     private var pulseRows: List<Int> = emptyList()
 
     init {
-        require(durationMs in 220L..280L) { "Clear pulse must last 220-280 ms" }
-        require(maxAlpha in 48..64) { "Clear pulse alpha must be 48-64" }
+        require(durationMs in 800L..1_200L) { "Clear pulse must last 800-1200 ms" }
+        require(maxAlpha in 96..192) { "Clear pulse alpha must be 96-192" }
     }
 
     /**
