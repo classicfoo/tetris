@@ -331,8 +331,6 @@ class GameSurfaceView @JvmOverloads constructor(
             }
         }
 
-        drawClearFlash(canvas, layout, palette, clearFlash)
-
         if (palette.bevel) {
             drawTengenBoard(canvas, state, palette, layout)
         } else {
@@ -342,10 +340,19 @@ class GameSurfaceView @JvmOverloads constructor(
                 }
             }
         }
-        if (settings.showGhost && state.status == GameStatus.RUNNING) {
+
+        // During a staged clear, the completed rows are still present. Draw
+        // the pulse over them so the player can see exactly what is about to
+        // disappear; after compaction the controller cancels on the next
+        // snapshot, so it cannot flash unrelated rows.
+        drawClearFlash(canvas, layout, palette, clearFlash)
+
+        if (!state.isClearing && settings.showGhost && state.status == GameStatus.RUNNING) {
             drawPiece(canvas, state.current.copy(y = state.ghostY), palette, layout, ghost = true)
         }
-        drawPiece(canvas, state.current, palette, layout, ghost = false)
+        if (!state.isClearing) {
+            drawPiece(canvas, state.current, palette, layout, ghost = false)
+        }
     }
 
     /**
@@ -683,7 +690,7 @@ class GameSurfaceView @JvmOverloads constructor(
             parent?.requestDisallowInterceptTouchEvent(false)
             return true
         }
-        if (engine.state.status != GameStatus.RUNNING) {
+        if (engine.state.status != GameStatus.RUNNING || engine.state.isClearing) {
             gestureInterpreter.cancel()
             return true
         }

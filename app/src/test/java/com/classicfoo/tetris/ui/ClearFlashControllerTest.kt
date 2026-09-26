@@ -21,7 +21,7 @@ class ClearFlashControllerTest {
         )
         val tick = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 200L,
+            nowMs = 140L,
         )
 
         assertTrue(start.active)
@@ -32,11 +32,11 @@ class ClearFlashControllerTest {
 
         val secondFlash = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 434L,
+            nowMs = 267L,
         )
         val thirdFlash = controller.observe(
             state(1, rows = listOf(17, 18, 19), event = GameEvent.LINE_CLEAR),
-            nowMs = 768L,
+            nowMs = 434L,
         )
 
         assertTrue(secondFlash.alpha >= ClearFlashController.DEFAULT_MAX_ALPHA - 1)
@@ -54,8 +54,8 @@ class ClearFlashControllerTest {
         assertFalse(darkBeat.active)
         assertEquals(0, darkBeat.alpha)
         assertEquals(listOf(19), darkBeat.rows)
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 1_010L).active)
-        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 1_010L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 510L).active)
+        assertFalse(controller.observe(state(1, rows = listOf(19)), nowMs = 510L).active)
     }
 
     @Test
@@ -113,6 +113,7 @@ class ClearFlashControllerTest {
         event: GameEvent = GameEvent.NONE,
     ): GameState = GameEngine(seed = 9L).state.copy(
         status = status,
+        isClearing = status == GameStatus.RUNNING && sequence > 0,
         clearSequence = sequence,
         lastClearedRows = rows,
         lastLines = rows.size,

@@ -13,7 +13,8 @@ data class ClearFlashFrame(
 }
 
 /**
- * Converts immutable clear metadata into one deterministic, short-lived row pulse.
+ * Converts immutable clear metadata into one deterministic row pulse while the
+ * engine is holding completed rows on the board.
  * The controller has no Android clock or drawing dependencies; callers provide uptime.
  */
 class ClearFlashController(
@@ -21,8 +22,8 @@ class ClearFlashController(
     private val maxAlpha: Int = DEFAULT_MAX_ALPHA,
 ) {
     companion object {
-        /** A full second gives the player time to register the clear and accolade. */
-        const val DEFAULT_DURATION_MS: Long = 1_000L
+        /** Keep the visual pulse synchronized with the engine's clear hold. */
+        const val DEFAULT_DURATION_MS: Long = 500L
         const val DEFAULT_MAX_ALPHA: Int = 160
 
         private const val PULSE_COUNT = 3
@@ -35,7 +36,7 @@ class ClearFlashController(
     private var pulseRows: List<Int> = emptyList()
 
     init {
-        require(durationMs in 800L..1_200L) { "Clear pulse must last 800-1200 ms" }
+        require(durationMs in 400L..700L) { "Clear pulse must last 400-700 ms" }
         require(maxAlpha in 96..192) { "Clear pulse alpha must be 96-192" }
     }
 
@@ -54,7 +55,7 @@ class ClearFlashController(
             }
             state.clearSequence > previousSequence -> {
                 seenSequence = state.clearSequence
-                if (state.status == GameStatus.RUNNING && state.lastClearedRows.isNotEmpty()) {
+                if (state.status == GameStatus.RUNNING && state.isClearing && state.lastClearedRows.isNotEmpty()) {
                     pulseStartedAtMs = nowMs
                     pulseRows = state.lastClearedRows.toList()
                 } else {
@@ -63,7 +64,7 @@ class ClearFlashController(
             }
         }
 
-        if (state.status != GameStatus.RUNNING) cancel()
+        if (state.status != GameStatus.RUNNING || !state.isClearing) cancel()
         return frame(nowMs)
     }
 
