@@ -45,7 +45,6 @@ class GestureInterpreter(
     private var horizontalSlopRemainderPx = 0f
     private var reverseRemainderPx = 0f
     private var softDropSteps = 0
-    private var verticalTrackingStarted = false
     private var holdSent = false
     private var maxDownVelocity = 0f
     private var lastPoint: GesturePoint? = null
@@ -56,7 +55,6 @@ class GestureInterpreter(
         mode = Mode.NONE
         horizontalDirection = 0
         horizontalRemainderPx = 0f
-        horizontalSlopRemainderPx = 0f
         reverseRemainderPx = 0f
         softDropSteps = 0
         holdSent = false
@@ -76,21 +74,14 @@ class GestureInterpreter(
         }
 
         return when (mode) {
-            Mode.HORIZONTAL -> {
-                val commands = if (previousMode == Mode.HORIZONTAL) {
-                    horizontalCommandsForDelta(point.x - previous.x).toMutableList()
-                } else {
-                    horizontalCommandsFromTotal(dx).toMutableList()
-                }
-                if (previousMode == Mode.HORIZONTAL) {
-                    if (point.y != previous.y) verticalTrackingStarted = true
-                    commands += verticalCommands(previous, point, dy)
-                }
-                commands
+            Mode.HORIZONTAL -> if (previousMode == Mode.HORIZONTAL) {
+                horizontalCommandsForDelta(point.x - previous.x)
+            } else {
+                horizontalCommandsFromTotal(dx)
             }
             Mode.VERTICAL -> {
                 val commands = verticalCommands(previous, point, dy).toMutableList()
-                if (previousMode == Mode.VERTICAL) {
+                if (!holdSent && softDropSteps > 0) {
                     commands += horizontalCommandsForDelta(point.x - previous.x)
                 }
                 commands
@@ -126,28 +117,11 @@ class GestureInterpreter(
                 } else {
                     horizontalCommandsFromTotal(dx)
                 }
-                updateDownVelocity(previous, point)
-                if (holdSent) {
-                    // Hold already replaced the piece; horizontal movement remains available.
-                } else if (dy >= hardDropDistancePx &&
-                    (maxDownVelocity >= hardDropVelocityPxPerSecond ||
-                        dy * 1_000f / duration >= hardDropVelocityPxPerSecond ||
-                        duration <= hardSwipeDurationMs)
-                ) {
-                    commands += GestureCommand.HardDrop
-                } else {
-                    if (verticalTrackingStarted || point.y != previous.y) {
-                        commands += verticalCommands(previous, point, dy)
-                    }
-                }
             }
             Mode.VERTICAL -> {
-                if (previousMode == Mode.VERTICAL) {
-                    commands += horizontalCommandsForDelta(point.x - previous.x)
-                }
                 updateDownVelocity(previous, point)
                 if (holdSent) {
-                    // Hold stops vertical actions, while horizontal movement remains available.
+                    // Hold is terminal for the gesture; do not turn a later rebound into a drop.
                 } else if (dy >= hardDropDistancePx &&
                     (maxDownVelocity >= hardDropVelocityPxPerSecond ||
                         dy * 1_000f / duration >= hardDropVelocityPxPerSecond ||
@@ -156,6 +130,9 @@ class GestureInterpreter(
                     commands += GestureCommand.HardDrop
                 } else {
                     commands += verticalCommands(previous, point, dy)
+                    if (!holdSent && softDropSteps > 0) {
+                        commands += horizontalCommandsForDelta(point.x - previous.x)
+                    }
                 }
             }
         }
@@ -253,7 +230,6 @@ class GestureInterpreter(
         horizontalSlopRemainderPx = 0f
         reverseRemainderPx = 0f
         softDropSteps = 0
-        verticalTrackingStarted = false
         holdSent = false
         maxDownVelocity = 0f
     }
