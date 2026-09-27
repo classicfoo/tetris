@@ -199,14 +199,14 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
-        assertConcaveCorner(parts, PixelPoint(39, 39))
+        assertConcaveCorner(parts, PixelPoint(40, 40))
         assertMiter(
             parts,
             miter = PixelPoint(72, 48),
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(80, 40, 120, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
-        assertConcaveCorner(parts, PixelPoint(81, 39))
+        assertConcaveCorner(parts, PixelPoint(80, 40))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -227,7 +227,7 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(0, 40, 40, 80), PixelRect(40, 80, 80, 120)),
             diagonalFace = PixelRect(0, 80, 40, 120),
         )
-        assertConcaveCorner(parts, PixelPoint(41, 79))
+        assertConcaveCorner(parts, PixelPoint(40, 80))
         assertNoCrossCellPositiveAreaOverlap(parts)
     }
 
@@ -247,7 +247,7 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(40, 0, 80, 40), PixelRect(0, 40, 40, 80)),
             diagonalFace = PixelRect(40, 40, 80, 80),
         )
-        assertConcaveCorner(s, PixelPoint(39, 39))
+        assertConcaveCorner(s, PixelPoint(40, 40))
         assertNoCrossCellPositiveAreaOverlap(s)
 
         val z = TengenBevelGeometry.fromCells(
@@ -264,8 +264,56 @@ class TengenBevelGeometryTest {
             adjacentCells = listOf(PixelRect(0, 0, 40, 40), PixelRect(40, 40, 80, 80)),
             diagonalFace = PixelRect(40, 0, 80, 40),
         )
-        assertConcaveCorner(z, PixelPoint(39, 41))
+        assertConcaveCorner(z, PixelPoint(40, 40))
         assertNoCrossCellPositiveAreaOverlap(z)
+    }
+
+    @Test
+    fun `concave bevel edges are orthogonal or exact forty five degrees`() {
+        val shapes = listOf(
+            listOf(
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(1, 1, 40, 40, 80, 80),
+                gridCell(2, 1, 80, 40, 120, 80),
+            ),
+            listOf(
+                gridCell(0, 0, 0, 0, 40, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(0, 2, 0, 80, 40, 120),
+                gridCell(1, 2, 40, 80, 80, 120),
+            ),
+            listOf(
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(2, 0, 80, 0, 120, 40),
+                gridCell(0, 1, 0, 40, 40, 80),
+                gridCell(1, 1, 40, 40, 80, 80),
+            ),
+            listOf(
+                gridCell(0, 0, 0, 0, 40, 40),
+                gridCell(1, 0, 40, 0, 80, 40),
+                gridCell(1, 1, 40, 40, 80, 80),
+                gridCell(2, 1, 80, 40, 120, 80),
+            ),
+            listOf(
+                gridCell(0, 0, 0, 0, 39, 41),
+                gridCell(1, 0, 39, 0, 81, 41),
+                gridCell(1, 1, 39, 41, 81, 80),
+                gridCell(2, 1, 81, 41, 120, 80),
+            ),
+        )
+
+        shapes.flatMap { TengenBevelGeometry.fromCells(it) }.flatMap { it.edgePolygons }
+            .forEach { polygon ->
+                polygon.points.zipWithNextCycle().forEach { (first, second) ->
+                    val dx = kotlin.math.abs(second.x - first.x)
+                    val dy = kotlin.math.abs(second.y - first.y)
+                    assertTrue(
+                        "edge $first -> $second must be horizontal, vertical, or 45 degrees",
+                        dx == 0 || dy == 0 || dx == dy,
+                    )
+                }
+            }
     }
 
     private fun assertConcaveCorner(parts: List<TengenBevelParts>, corner: PixelPoint) {

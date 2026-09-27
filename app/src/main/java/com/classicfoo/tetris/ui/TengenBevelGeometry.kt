@@ -100,13 +100,6 @@ object TengenBevelGeometry {
      */
     private const val BEVEL_RATIO = 0.18f
 
-    /**
-     * The one-pixel extension closes the tiny raster gap at an inside miter.
-     * It is directed into the missing quadrant, so the two adjoining bevels
-     * overlap at the corner instead of ending on separate inset vertices.
-     */
-    private const val CONCAVE_CORNER_OVERLAP_PX = 1
-
     fun fromFloat(
         left: Float,
         top: Float,
@@ -173,11 +166,17 @@ object TengenBevelGeometry {
         val adjusted = parts.toMutableList()
         concaveMiterAdjustments(byCoordinate, partsByCoordinate).forEach { adjustment ->
             val index = indexByCoordinate[adjustment.coordinate] ?: return@forEach
-            adjusted[index] = adjusted[index].withEdgePoint(
-                edge = adjustment.edge,
-                pointIndex = adjustment.pointIndex,
-                point = adjustment.miter,
-            )
+            adjusted[index] = adjusted[index]
+                .withEdgePoint(
+                    edge = adjustment.edge,
+                    pointIndex = adjustment.pointIndex,
+                    point = adjustment.miter,
+                )
+                .withInsertedEdgePoint(
+                    edge = adjustment.edge,
+                    pointIndex = adjustment.insertBeforePointIndex,
+                    point = adjustment.corner,
+                )
         }
         return adjusted
     }
@@ -288,6 +287,8 @@ object TengenBevelGeometry {
         val edge: Edge,
         val pointIndex: Int,
         val miter: PixelPoint,
+        val insertBeforePointIndex: Int,
+        val corner: PixelPoint,
     )
 
     private data class MiterBoundary(
@@ -354,7 +355,7 @@ object TengenBevelGeometry {
                         firstCoordinate = quadrants.getValue(CornerQuadrant.TOP_LEFT)!!.coordinate,
                         firstEdge = Edge.BOTTOM,
                         firstPointIndex = 2,
-                        firstCornerPointIndex = 0,
+                        firstCornerPointIndex = 1,
                         secondCoordinate = quadrants.getValue(CornerQuadrant.BOTTOM_RIGHT)!!.coordinate,
                         secondEdge = Edge.LEFT,
                         secondPointIndex = 1,
@@ -387,39 +388,39 @@ object TengenBevelGeometry {
                     CornerQuadrant.BOTTOM_RIGHT,
                     -> PixelPoint(secondPoint.x, firstPoint.y)
                 }
-                val corner = concaveCorner(quadrants, missing)
+                val corner = concaveCorner(quadrants)
                 result += MiterAdjustment(
                     coordinate = boundary.firstCoordinate,
                     edge = boundary.firstEdge,
                     pointIndex = boundary.firstPointIndex,
                     miter = miter,
-                )
-                result += MiterAdjustment(
-                    coordinate = boundary.firstCoordinate,
-                    edge = boundary.firstEdge,
-                    pointIndex = boundary.firstCornerPointIndex,
-                    miter = corner,
+                    insertBeforePointIndex = cornerInsertionIndex(
+                        pointIndex = boundary.firstPointIndex,
+                        cornerPointIndex = boundary.firstCornerPointIndex,
+                    ),
+                    corner = corner,
                 )
                 result += MiterAdjustment(
                     coordinate = boundary.secondCoordinate,
                     edge = boundary.secondEdge,
                     pointIndex = boundary.secondPointIndex,
                     miter = miter,
-                )
-                result += MiterAdjustment(
-                    coordinate = boundary.secondCoordinate,
-                    edge = boundary.secondEdge,
-                    pointIndex = boundary.secondCornerPointIndex,
-                    miter = corner,
+                    insertBeforePointIndex = cornerInsertionIndex(
+                        pointIndex = boundary.secondPointIndex,
+                        cornerPointIndex = boundary.secondCornerPointIndex,
+                    ),
+                    corner = corner,
                 )
             }
         }
         return result
     }
 
+    private fun cornerInsertionIndex(pointIndex: Int, cornerPointIndex: Int): Int =
+        if (cornerPointIndex == 0 && pointIndex == 3) 0 else maxOf(pointIndex, cornerPointIndex)
+
     private fun concaveCorner(
         quadrants: Map<CornerQuadrant, TengenGridCell?>,
-        missing: CornerQuadrant,
     ): PixelPoint {
         val vertexX = listOfNotNull(
             quadrants[CornerQuadrant.TOP_LEFT]?.bounds?.right,
@@ -433,12 +434,10 @@ object TengenBevelGeometry {
             quadrants[CornerQuadrant.BOTTOM_LEFT]?.bounds?.top,
             quadrants[CornerQuadrant.BOTTOM_RIGHT]?.bounds?.top,
         ).first()
-        val xDirection = if (missing == CornerQuadrant.TOP_LEFT || missing == CornerQuadrant.BOTTOM_LEFT) -1 else 1
-        val yDirection = if (missing == CornerQuadrant.TOP_LEFT || missing == CornerQuadrant.TOP_RIGHT) -1 else 1
-        return PixelPoint(
-            vertexX + xDirection * CONCAVE_CORNER_OVERLAP_PX,
-            vertexY + yDirection * CONCAVE_CORNER_OVERLAP_PX,
-        )
+        // Keep the original outer corner in each bevel polygon and insert
+        // this exact shared vertex between it and the miter. That extends the
+        // bevel across the one-pixel inset without introducing a non-45° edge.
+        return PixelPoint(vertexX, vertexY)
     }
 
     private fun endpoint(polygon: PixelPolygon?, index: Int): PixelPoint? = polygon?.points?.getOrNull(index)
@@ -461,9 +460,25 @@ object TengenBevelGeometry {
         Edge.BOTTOM -> copy(bottom = bottom?.replacePoint(pointIndex, point))
     }
 
+    private fun TengenBevelParts.withInsertedEdgePoint(
+        edge: Edge,
+        pointIndex: Int,
+        point: PixelPoint,
+    ): TengenBevelParts = when (edge) {
+        Edge.TOP -> copy(top = top?.insertPoint(pointIndex, point))
+        Edge.LEFT -> copy(left = left?.insertPoint(pointIndex, point))
+        Edge.RIGHT -> copy(right = right?.insertPoint(pointIndex, point))
+        Edge.BOTTOM -> copy(bottom = bottom?.insertPoint(pointIndex, point))
+    }
+
     private fun PixelPolygon.replacePoint(index: Int, point: PixelPoint): PixelPolygon {
         if (index !in points.indices) return this
         return copy(points = points.toMutableList().also { it[index] = point })
+    }
+
+    private fun PixelPolygon.insertPoint(index: Int, point: PixelPoint): PixelPolygon {
+        if (index !in 0..points.size) return this
+        return copy(points = points.toMutableList().also { it.add(index, point) })
     }
 
     private fun polygon(vararg points: PixelPoint): PixelPolygon = PixelPolygon(points.toList())
