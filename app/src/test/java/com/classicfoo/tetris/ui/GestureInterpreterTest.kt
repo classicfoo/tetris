@@ -181,6 +181,34 @@ class GestureInterpreterTest {
     }
 
     @Test
+    fun `horizontal movement can be followed by a fast hard drop without lifting`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(100f, 100f, 0L))
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(150f, 100f, 100L)))
+        assertTrue(interpreter.onMove(point(150f, 220f, 200L)).isEmpty())
+
+        assertEquals(
+            listOf(GestureCommand.HardDrop),
+            interpreter.onUp(point(150f, 220f, 220L), viewWidth = 400f),
+        )
+    }
+
+    @Test
+    fun `horizontal movement can continue after hold without lifting`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(100f, 300f, 0L))
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(150f, 300f, 100L)))
+        assertEquals(listOf(GestureCommand.Hold), interpreter.onMove(point(150f, 220f, 200L)))
+
+        val commands = interpreter.onMove(point(195f, 220f, 300L))
+
+        assertEquals(2, commands.size)
+        assertTrue(commands.all { it == GestureCommand.MoveRight })
+    }
+
+    @Test
     fun `action up consumes the final vertical segment without duplicating soft drop`() {
         val interpreter = GestureInterpreter()
 
