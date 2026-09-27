@@ -42,6 +42,7 @@ class GestureInterpreter(
     private var mode = Mode.NONE
     private var horizontalDirection = 0
     private var horizontalRemainderPx = 0f
+    private var horizontalSlopRemainderPx = 0f
     private var reverseRemainderPx = 0f
     private var softDropSteps = 0
     private var holdSent = false
@@ -78,7 +79,13 @@ class GestureInterpreter(
             } else {
                 horizontalCommandsFromTotal(dx)
             }
-            Mode.VERTICAL -> verticalCommands(previous, point, dy)
+            Mode.VERTICAL -> {
+                val commands = verticalCommands(previous, point, dy).toMutableList()
+                if (!holdSent && softDropSteps > 0) {
+                    commands += horizontalCommandsForDelta(point.x - previous.x)
+                }
+                commands
+            }
             Mode.NONE -> emptyList()
         }
     }
@@ -123,6 +130,9 @@ class GestureInterpreter(
                     commands += GestureCommand.HardDrop
                 } else {
                     commands += verticalCommands(previous, point, dy)
+                    if (!holdSent && softDropSteps > 0) {
+                        commands += horizontalCommandsForDelta(point.x - previous.x)
+                    }
                 }
             }
         }
@@ -140,6 +150,7 @@ class GestureInterpreter(
 
         horizontalDirection = if (dx >= 0f) 1 else -1
         horizontalRemainderPx = distanceAfterSlop
+        horizontalSlopRemainderPx = 0f
         reverseRemainderPx = 0f
         return emitHorizontalSteps()
     }
@@ -149,10 +160,11 @@ class GestureInterpreter(
         if (distance <= 0f) return emptyList()
 
         if (horizontalDirection == 0) {
-            val distanceAfterSlop = (distance - touchSlopPx).coerceAtLeast(0f)
-            if (distanceAfterSlop <= 0f) return emptyList()
-            horizontalDirection = if (deltaX >= 0f) 1 else -1
-            horizontalRemainderPx = distanceAfterSlop
+            horizontalSlopRemainderPx += deltaX
+            if (abs(horizontalSlopRemainderPx) <= touchSlopPx) return emptyList()
+            horizontalDirection = if (horizontalSlopRemainderPx >= 0f) 1 else -1
+            horizontalRemainderPx = abs(horizontalSlopRemainderPx) - touchSlopPx
+            horizontalSlopRemainderPx = 0f
             return emitHorizontalSteps()
         }
 
@@ -215,6 +227,7 @@ class GestureInterpreter(
         mode = Mode.NONE
         horizontalDirection = 0
         horizontalRemainderPx = 0f
+        horizontalSlopRemainderPx = 0f
         reverseRemainderPx = 0f
         softDropSteps = 0
         holdSent = false

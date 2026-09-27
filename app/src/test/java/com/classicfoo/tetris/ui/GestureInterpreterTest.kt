@@ -155,6 +155,32 @@ class GestureInterpreterTest {
     }
 
     @Test
+    fun `slow downward drag can move horizontally without lifting`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(200f, 100f, 0L))
+        assertEquals(listOf(GestureCommand.SoftDrop), interpreter.onMove(point(200f, 150f, 500L)))
+
+        val right = interpreter.onMove(point(245f, 150f, 650L))
+        val left = interpreter.onMove(point(200f, 150f, 800L))
+
+        assertEquals(listOf(GestureCommand.MoveRight), right)
+        assertEquals(listOf(GestureCommand.MoveLeft), left)
+        assertTrue(interpreter.onUp(point(200f, 150f, 900L), viewWidth = 400f).isEmpty())
+    }
+
+    @Test
+    fun `horizontal tracking accumulates small moves after soft drop`() {
+        val interpreter = GestureInterpreter()
+
+        interpreter.onDown(point(200f, 100f, 0L))
+        assertEquals(listOf(GestureCommand.SoftDrop), interpreter.onMove(point(200f, 150f, 500L)))
+        assertTrue(interpreter.onMove(point(210f, 150f, 600L)).isEmpty())
+        assertTrue(interpreter.onMove(point(220f, 150f, 700L)).isEmpty())
+        assertEquals(listOf(GestureCommand.MoveRight), interpreter.onMove(point(240f, 150f, 800L)))
+    }
+
+    @Test
     fun `action up consumes the final vertical segment without duplicating soft drop`() {
         val interpreter = GestureInterpreter()
 
