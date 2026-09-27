@@ -124,7 +124,7 @@ object TengenBevelGeometry {
         cell = PixelRect(left, top, right, bottom),
         exposed = ExposedEdges.ALL,
         gutterPx = gutterPx,
-    )
+    ).withConvexCorners()
 
     /**
      * Builds bevel parts for one contiguous tetromino. Cells that share a
@@ -178,7 +178,7 @@ object TengenBevelGeometry {
                     point = adjustment.corner,
                 )
         }
-        return adjusted
+        return adjusted.map { it.withConvexCorners() }
     }
 
     private fun fromCell(
@@ -255,6 +255,58 @@ object TengenBevelGeometry {
                 null
             },
         )
+    }
+
+    /**
+     * Extends each exposed convex corner to the snapped cell corner. This is
+     * deliberately applied after inside-miter adjustments so the concave
+     * point indices remain stable while they are calculated.
+     */
+    private fun TengenBevelParts.withConvexCorners(): TengenBevelParts {
+        if (isFlat) return this
+
+        var result = this
+        if (top != null && right != null) {
+            result = result
+                .withInsertedPointAfter(
+                    Edge.TOP,
+                    PixelPoint(face.right, face.top),
+                    PixelPoint(cell.right, cell.top),
+                )
+                .withInsertedEdgePoint(Edge.RIGHT, result.right!!.points.size, PixelPoint(cell.right, cell.top))
+        }
+        if (top != null && left != null) {
+            result = result
+                .withInsertedEdgePoint(Edge.TOP, result.top!!.points.size, PixelPoint(cell.left, cell.top))
+                .withInsertedPointAfter(
+                    Edge.LEFT,
+                    PixelPoint(face.left, face.top),
+                    PixelPoint(cell.left, cell.top),
+                )
+        }
+        if (bottom != null && right != null) {
+            result = result
+                .withInsertedPointAfter(
+                    Edge.BOTTOM,
+                    PixelPoint(face.right, face.bottom),
+                    PixelPoint(cell.right, cell.bottom),
+                )
+                .withInsertedPointAfter(
+                    Edge.RIGHT,
+                    PixelPoint(face.right, face.bottom),
+                    PixelPoint(cell.right, cell.bottom),
+                )
+        }
+        if (bottom != null && left != null) {
+            result = result
+                .withInsertedEdgePoint(Edge.BOTTOM, result.bottom!!.points.size, PixelPoint(cell.left, cell.bottom))
+                .withInsertedPointBefore(
+                    Edge.LEFT,
+                    PixelPoint(face.left, face.bottom),
+                    PixelPoint(cell.left, cell.bottom),
+                )
+        }
+        return result
     }
 
     private data class ExposedEdges(
@@ -469,6 +521,24 @@ object TengenBevelGeometry {
         Edge.LEFT -> copy(left = left?.insertPoint(pointIndex, point))
         Edge.RIGHT -> copy(right = right?.insertPoint(pointIndex, point))
         Edge.BOTTOM -> copy(bottom = bottom?.insertPoint(pointIndex, point))
+    }
+
+    private fun TengenBevelParts.withInsertedPointAfter(
+        edge: Edge,
+        anchor: PixelPoint,
+        point: PixelPoint,
+    ): TengenBevelParts {
+        val index = edge(edge)?.points?.indexOf(anchor) ?: -1
+        return if (index >= 0) withInsertedEdgePoint(edge, index + 1, point) else this
+    }
+
+    private fun TengenBevelParts.withInsertedPointBefore(
+        edge: Edge,
+        anchor: PixelPoint,
+        point: PixelPoint,
+    ): TengenBevelParts {
+        val index = edge(edge)?.points?.indexOf(anchor) ?: -1
+        return if (index >= 0) withInsertedEdgePoint(edge, index, point) else this
     }
 
     private fun PixelPolygon.replacePoint(index: Int, point: PixelPoint): PixelPolygon {

@@ -9,13 +9,13 @@ import org.junit.Test
 
 class TengenBevelGeometryTest {
     @Test
-    fun `bevel polygons remain inside the inset face`() {
+    fun `bevel polygons remain inside the cell bounds`() {
         val parts = TengenBevelGeometry.fromCell(10, 20, 110, 120)
 
         assertFalse(parts.isFlat)
         parts.edgePolygons
             .flatMap { it.points }
-            .forEach { point -> assertTrue(parts.face.contains(point)) }
+            .forEach { point -> assertTrue(parts.cell.contains(point)) }
     }
 
     @Test
@@ -85,6 +85,21 @@ class TengenBevelGeometryTest {
     }
 
     @Test
+    fun `convex bevels share each snapped cell corner exactly once per adjoining edge`() {
+        val parts = TengenBevelGeometry.fromCell(10, 20, 110, 120)
+        val corners = listOf(
+            PixelPoint(10, 20),
+            PixelPoint(110, 20),
+            PixelPoint(10, 120),
+            PixelPoint(110, 120),
+        )
+
+        corners.forEach { corner ->
+            assertEquals(2, parts.edgePolygons.count { corner in it.points })
+        }
+    }
+
+    @Test
     fun `joined cells remove only the internal seam`() {
         val parts = TengenBevelGeometry.fromCells(
             listOf(
@@ -150,8 +165,8 @@ class TengenBevelGeometryTest {
             assertFalse("mask=$mask unexpectedly flat", center.isFlat)
             assertEquals("mask=$mask has the wrong edge count", Integer.bitCount(mask), center.edgePolygons.size)
             center.edgePolygons.forEach { polygon ->
-                assertEquals(4, polygon.points.toSet().size)
-                polygon.points.forEach { point -> assertTrue(center.face.contains(point)) }
+                assertTrue("mask=$mask has too few polygon points", polygon.points.toSet().size >= 4)
+                polygon.points.forEach { point -> assertTrue(center.cell.contains(point)) }
             }
             assertNoPositiveAreaOverlap(center.edgePolygons)
         }
@@ -303,17 +318,20 @@ class TengenBevelGeometryTest {
             ),
         )
 
-        shapes.flatMap { TengenBevelGeometry.fromCells(it) }.flatMap { it.edgePolygons }
-            .forEach { polygon ->
+        shapes.forEachIndexed { shapeIndex, shape ->
+            TengenBevelGeometry.fromCells(shape).flatMap { it.edgePolygons }
+                .forEachIndexed { polygonIndex, polygon ->
                 polygon.points.zipWithNextCycle().forEach { (first, second) ->
                     val dx = kotlin.math.abs(second.x - first.x)
                     val dy = kotlin.math.abs(second.y - first.y)
                     assertTrue(
-                        "edge $first -> $second must be horizontal, vertical, or 45 degrees",
+                        "shape=$shapeIndex polygon=$polygonIndex points=${polygon.points}: " +
+                            "edge $first -> $second must be horizontal, vertical, or 45 degrees",
                         dx == 0 || dy == 0 || dx == dy,
                     )
                 }
             }
+        }
     }
 
     private fun assertConcaveCorner(parts: List<TengenBevelParts>, corner: PixelPoint) {
