@@ -11,7 +11,6 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
-import android.graphics.drawable.Drawable
 import com.classicfoo.tetris.engine.ActivePiece
 import com.classicfoo.tetris.engine.BOARD_HEIGHT
 import com.classicfoo.tetris.engine.BOARD_WIDTH
@@ -58,10 +57,6 @@ class GameSurfaceView @JvmOverloads constructor(
         typeface = TetrisTypography.bold(context)
         isSubpixelText = true
     }
-    private val spriteSheet by lazy { SpriteSheet.load(context) }
-    private val widePanelSprite by lazy { spriteSheet.panel(SpriteSheet.Regions.WIDE_PANEL) }
-    private val largePanelSprite by lazy { spriteSheet.panel(SpriteSheet.Regions.LARGE_PANEL) }
-    private val tallPanelSprite by lazy { spriteSheet.panel(SpriteSheet.Regions.TALL_PANEL) }
     private var settings = initialSettings
     private var running = false
     private var lastFrameAt = 0L
@@ -200,7 +195,7 @@ class GameSurfaceView @JvmOverloads constructor(
         val statsRight = (width - actionReserve)
             .coerceAtLeast(margin + dp(120f))
             .coerceAtMost(width - margin)
-        drawFramedPanel(canvas, margin, headerTop, statsRight, headerBottom)
+        drawFramedPanel(canvas, palette, margin, headerTop, statsRight, headerBottom, dp(12f))
 
         val columnWidth = (statsRight - margin) / 3f
         gridPaint.color = palette.accent
@@ -230,8 +225,8 @@ class GameSurfaceView @JvmOverloads constructor(
         val cardGap = dp(8f)
         val nextLeft = margin + cardWidth + cardGap
         val nextRight = width - margin
-        drawFramedPanel(canvas, margin, cardTop, margin + cardWidth, cardBottom)
-        drawFramedPanel(canvas, nextLeft, cardTop, nextRight, cardBottom)
+        drawFramedPanel(canvas, palette, margin, cardTop, margin + cardWidth, cardBottom, dp(12f))
+        drawFramedPanel(canvas, palette, nextLeft, cardTop, nextRight, cardBottom, dp(12f))
         drawCardLabel(canvas, "HOLD", margin + cardWidth / 2f, cardTop + dp(17f), palette)
         drawCardLabel(canvas, "NEXT", (nextLeft + nextRight) / 2f, cardTop + dp(17f), palette)
 
@@ -279,7 +274,16 @@ class GameSurfaceView @JvmOverloads constructor(
             baseline + textPaint.descent() + verticalPadding,
         )
 
-        drawSpritePanel(canvas, widePanelSprite, box.left, box.top, box.right, box.bottom)
+        drawBeveledPanel(
+            canvas = canvas,
+            palette = palette,
+            left = box.left,
+            top = box.top,
+            right = box.right,
+            bottom = box.bottom,
+            cutCorner = dp(7f),
+            fillColor = palette.overlay,
+        )
         textPaint.color = palette.accent
         canvas.drawText(label, centerX, baseline, textPaint)
     }
@@ -319,13 +323,22 @@ class GameSurfaceView @JvmOverloads constructor(
     ) {
         val lockedRamp = LevelLockedPalette.ramp(state.level)
         val outer = RectF(
-            snap(layout.boardLeft - dp(8f)),
-            snap(layout.boardTop - dp(8f)),
-            snap(layout.boardRight + dp(8f)),
-            snap(layout.boardBottom + dp(8f)),
+            snap(layout.boardLeft - dp(4f)),
+            snap(layout.boardTop - dp(4f)),
+            snap(layout.boardRight + dp(4f)),
+            snap(layout.boardBottom + dp(4f)),
         )
         if (palette.pixelStyle) {
-            drawSpritePanel(canvas, tallPanelSprite, outer.left, outer.top, outer.right, outer.bottom)
+            drawBeveledPanel(
+                canvas = canvas,
+                palette = palette,
+                left = outer.left,
+                top = outer.top,
+                right = outer.right,
+                bottom = outer.bottom,
+                cutCorner = dp(5f),
+                fillColor = palette.board,
+            )
             pixelPaint.color = palette.board
             canvas.drawRect(
                 snap(layout.boardLeft),
@@ -734,34 +747,80 @@ class GameSurfaceView @JvmOverloads constructor(
 
     private fun drawFramedPanel(
         canvas: Canvas,
+        palette: Palette,
         left: Float,
         top: Float,
         right: Float,
         bottom: Float,
+        radius: Float,
+        fillColor: Int = palette.panel,
     ) {
-        val sprite = when {
-            right - left > (bottom - top) * 2.2f -> widePanelSprite
-            bottom - top > (right - left) * 1.45f -> tallPanelSprite
-            else -> largePanelSprite
-        }
-        drawSpritePanel(canvas, sprite, left, top, right, bottom)
+        drawBeveledPanel(canvas, palette, left, top, right, bottom, radius, fillColor)
     }
 
-    private fun drawSpritePanel(
+    private fun drawBeveledPanel(
         canvas: Canvas,
-        sprite: Drawable,
+        palette: Palette,
         left: Float,
         top: Float,
         right: Float,
         bottom: Float,
+        cutCorner: Float,
+        fillColor: Int,
     ) {
-        sprite.setBounds(
-            left.roundToInt(),
-            top.roundToInt(),
-            right.roundToInt(),
-            bottom.roundToInt(),
+        val outer = RectF(left, top, right, bottom)
+        val cut = cutCorner.coerceAtMost(min(outer.width(), outer.height()) / 3f)
+        val frameInset = dp(1f)
+        val innerInset = dp(4f).coerceAtMost(min(outer.width(), outer.height()) / 5f)
+
+        pixelPaint.style = Paint.Style.FILL
+        pixelPaint.alpha = 255
+        pixelPaint.color = palette.pixelOutline
+        canvas.drawPath(chamferedPath(outer, cut), pixelPaint)
+
+        pixelPaint.color = palette.accent
+        canvas.drawPath(
+            chamferedPath(
+                RectF(outer).apply { inset(frameInset, frameInset) },
+                (cut - frameInset).coerceAtLeast(0f),
+            ),
+            pixelPaint,
         )
-        sprite.draw(canvas)
+
+        pixelPaint.color = fillColor
+        canvas.drawPath(
+            chamferedPath(
+                RectF(outer).apply { inset(innerInset, innerInset) },
+                (cut - innerInset).coerceAtLeast(0f),
+            ),
+            pixelPaint,
+        )
+
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = max(dp(1f), dp(1.25f))
+        blockPaint.strokeCap = Paint.Cap.SQUARE
+        blockPaint.color = TengenStyle.frameHighlight
+        blockPaint.alpha = 235
+        canvas.drawLine(left + cut, top + blockPaint.strokeWidth / 2f, right - cut, top + blockPaint.strokeWidth / 2f, blockPaint)
+        canvas.drawLine(left + blockPaint.strokeWidth / 2f, top + cut, left + blockPaint.strokeWidth / 2f, bottom - cut, blockPaint)
+        blockPaint.color = TengenStyle.frameShadow
+        blockPaint.alpha = 255
+        canvas.drawLine(left + cut, bottom - blockPaint.strokeWidth / 2f, right - cut, bottom - blockPaint.strokeWidth / 2f, blockPaint)
+        canvas.drawLine(right - blockPaint.strokeWidth / 2f, top + cut, right - blockPaint.strokeWidth / 2f, bottom - cut, blockPaint)
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.alpha = 255
+    }
+
+    private fun chamferedPath(rect: RectF, cut: Float): Path = Path().apply {
+        moveTo(rect.left + cut, rect.top)
+        lineTo(rect.right - cut, rect.top)
+        lineTo(rect.right, rect.top + cut)
+        lineTo(rect.right, rect.bottom - cut)
+        lineTo(rect.right - cut, rect.bottom)
+        lineTo(rect.left + cut, rect.bottom)
+        lineTo(rect.left, rect.bottom - cut)
+        lineTo(rect.left, rect.top + cut)
+        close()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
