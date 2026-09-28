@@ -161,10 +161,10 @@ class GameSurfaceView @JvmOverloads constructor(
 
     private fun calculateLayout(): BoardLayout {
         val margin = dp(12f)
-        val hudHeight = min(
-            height * 0.42f,
-            max(dp(126f), dp(88f + settings.previewCount * 24f)),
-        )
+        // Keep the piece rail compact so the board starts directly beneath
+        // the HUD instead of leaving a tall, mostly empty column on either
+        // side of the playfield.
+        val hudHeight = dp(136f)
         val boardTopArea = hudHeight + dp(10f)
         val boardBottomArea = height - dp(10f)
         val cell = min(
@@ -203,29 +203,34 @@ class GameSurfaceView @JvmOverloads constructor(
         val cardTop = dp(64f)
         val cardBottom = (layout.hudHeight - dp(8f)).coerceAtLeast(cardTop + dp(38f))
         val cardWidth = dp(78f)
+        val cardGap = dp(8f)
+        val nextLeft = margin + cardWidth + cardGap
+        val nextRight = width - margin
         drawPanel(canvas, palette.panel, margin, cardTop, margin + cardWidth, cardBottom, dp(12f))
-        drawPanel(canvas, palette.panel, width - margin - cardWidth, cardTop, width - margin, cardBottom, dp(12f))
+        drawPanel(canvas, palette.panel, nextLeft, cardTop, nextRight, cardBottom, dp(12f))
         drawCardLabel(canvas, "HOLD", margin + cardWidth / 2f, cardTop + dp(17f), palette)
-        drawCardLabel(canvas, "NEXT", width - margin - cardWidth / 2f, cardTop + dp(17f), palette)
+        drawCardLabel(canvas, "NEXT", (nextLeft + nextRight) / 2f, cardTop + dp(17f), palette)
 
         val cardHeight = cardBottom - cardTop
-        val holdCell = min(dp(17f), cardWidth / 5f)
+        val previewTop = cardTop + dp(23f)
+        val previewHeight = (cardHeight - dp(23f)).coerceAtLeast(dp(18f))
+        val holdCell = min(dp(13f), min(cardWidth / 5f, previewHeight / 3f))
         state.hold?.let {
-            drawMiniPiece(canvas, it, palette, margin, cardTop + dp(23f), cardWidth, dp(29f), holdCell)
+            drawMiniPiece(canvas, it, palette, margin, previewTop, cardWidth, previewHeight, holdCell)
         }
         val nextItems = state.next.take(settings.previewCount)
         if (nextItems.isNotEmpty()) {
-            val slotHeight = ((cardHeight - dp(24f)) / nextItems.size).coerceAtLeast(dp(18f))
-            val nextCell = min(dp(10f), min(cardWidth / 7f, slotHeight / 4.2f))
+            val slotWidth = (nextRight - nextLeft) / nextItems.size
+            val nextCell = min(dp(9f), min(slotWidth / 4.2f, previewHeight / 4.2f))
             nextItems.forEachIndexed { index, type ->
                 drawMiniPiece(
                     canvas,
                     type,
                     palette,
-                    width - margin - cardWidth,
-                    cardTop + dp(22f) + index * slotHeight,
-                    cardWidth,
-                    slotHeight,
+                    nextLeft + index * slotWidth,
+                    previewTop,
+                    slotWidth,
+                    previewHeight,
                     nextCell,
                 )
             }
