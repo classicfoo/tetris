@@ -3,23 +3,7 @@ package com.classicfoo.tetris.settings
 import android.content.Context
 import androidx.core.content.edit
 
-enum class ThemeOption {
-    CLASSIC, TENGEN_BEVEL, GAME_BOY;
-
-    fun next(): ThemeOption = entries[(ordinal + 1) % entries.size]
-
-    companion object {
-        fun fromStoredName(value: String?): ThemeOption = when (value) {
-            TENGEN_BEVEL.name -> TENGEN_BEVEL
-            GAME_BOY.name -> GAME_BOY
-            "NEON", "MONOCHROME" -> CLASSIC
-            else -> CLASSIC
-        }
-    }
-}
-
 data class GameSettings(
-    val theme: ThemeOption = ThemeOption.CLASSIC,
     val showGrid: Boolean = true,
     val showGhost: Boolean = true,
     val soundEnabled: Boolean = true,
@@ -41,13 +25,10 @@ class SettingsStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun load(): GameSettings {
-        val storedTheme = preferences.getString(KEY_THEME, ThemeOption.CLASSIC.name)
-        val theme = ThemeOption.fromStoredName(storedTheme)
-        if (storedTheme != theme.name) {
-            preferences.edit { putString(KEY_THEME, theme.name) }
-        }
+        // Discard the old selectable-theme value while leaving every gameplay
+        // preference untouched. Tengen Bevel is now the only supported style.
+        preferences.edit { remove(KEY_THEME) }
         return GameSettings(
-            theme = theme,
             showGrid = preferences.getBoolean(KEY_GRID, true),
             showGhost = preferences.getBoolean(KEY_GHOST, true),
             soundEnabled = preferences.getBoolean(KEY_SOUND, true),
@@ -62,7 +43,9 @@ class SettingsStore(context: Context) {
 
     fun save(settings: GameSettings) {
         preferences.edit {
-            putString(KEY_THEME, settings.theme.name)
+            // Do not persist theme selection. Remove the legacy key so an
+            // existing install cannot retain an obsolete alternate style.
+            remove(KEY_THEME)
             .putBoolean(KEY_GRID, settings.showGrid)
             .putBoolean(KEY_GHOST, settings.showGhost)
             .putBoolean(KEY_SOUND, settings.soundEnabled)
@@ -77,6 +60,7 @@ class SettingsStore(context: Context) {
 
     private companion object {
         const val PREFERENCES = "tetris_settings"
+        // Legacy key removed on load/save; no theme is part of GameSettings.
         const val KEY_THEME = "theme"
         const val KEY_GRID = "grid"
         const val KEY_GHOST = "ghost"

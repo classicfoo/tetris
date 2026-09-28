@@ -1,0 +1,8 @@
+Pixel Operator
+==============
+
+Pixel Operator was created by Jayvee Enaguas and is distributed under the
+CC0 1.0 Universal dedication.
+
+Source: https://www.dafont.com/pixel-operator.font
+License text: https://creativecommons.org/publicdomain/zero/1.0/

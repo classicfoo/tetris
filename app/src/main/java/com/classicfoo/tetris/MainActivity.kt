@@ -1,10 +1,15 @@
 package com.classicfoo.tetris
 
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -30,9 +35,9 @@ import com.classicfoo.tetris.settings.GameSettings
 import com.classicfoo.tetris.settings.ScoreEntry
 import com.classicfoo.tetris.settings.ScoreStore
 import com.classicfoo.tetris.settings.SettingsStore
-import com.classicfoo.tetris.settings.ThemeOption
 import com.classicfoo.tetris.ui.Feedback
 import com.classicfoo.tetris.ui.GameSurfaceView
+import com.classicfoo.tetris.ui.TetrisTypography
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.switchmaterial.SwitchMaterial
@@ -60,7 +65,7 @@ class MainActivity : ComponentActivity() {
         feedback.updateSettings(settings)
 
         rootView = FrameLayout(this).apply {
-            setBackgroundColor(GameSurfaceView.backgroundColor(settings.theme))
+            setBackgroundColor(TENGEN_BACKGROUND)
             clipChildren = false
         }
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
@@ -84,7 +89,7 @@ class MainActivity : ComponentActivity() {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 4.dp(), 12.dp(), 0)
+            setPadding(0, 4.dp(), 0, 0)
             elevation = 4.dp().toFloat()
         }
         pauseButton = iconButton(R.drawable.ic_pause, R.string.pause) {
@@ -100,15 +105,12 @@ class MainActivity : ComponentActivity() {
                 GameStatus.GAME_OVER -> showMenu(GameStatus.GAME_OVER)
             }
         }
-        actions.addView(pauseButton)
+        actions.addView(pauseButton, iconLayoutParams())
         settingsButton = iconButton(R.drawable.ic_settings, R.string.settings) { showSettings() }
-        actions.addView(settingsButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { marginStart = 8.dp() })
+        actions.addView(settingsButton, iconLayoutParams().apply { marginStart = 8.dp() })
         rootView.addView(actions, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+            104.dp(),
+            52.dp(),
             Gravity.TOP or Gravity.END,
         ))
 
@@ -208,17 +210,6 @@ class MainActivity : ComponentActivity() {
         val scroll = ScrollView(this).apply { addView(content) }
 
         content.addView(sectionLabel(getString(R.string.display_settings)))
-        val themeButton = actionButton(themeLabel(), getString(R.string.theme)) {}
-        themeButton.setOnClickListener {
-            settings = settings.copy(theme = settings.theme.next())
-            settingsStore.save(settings)
-            themeButton.text = themeLabel()
-            themeButton.contentDescription = themeLabel()
-            gameView.updateSettings(settings)
-            updateChromeColors()
-            updateActionIconTint()
-        }
-        content.addView(themeButton)
         content.addView(switchSetting(getString(R.string.show_grid), settings.showGrid) { value ->
             settings = settings.copy(showGrid = value)
             settingsStore.save(settings)
@@ -289,9 +280,18 @@ class MainActivity : ComponentActivity() {
             isChecked = checked
             setTextColor(dialogTextColor())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            buttonTintList = ColorStateList.valueOf(accentColor())
-            setPadding(4.dp(), 5.dp(), 4.dp(), 5.dp())
+            typeface = pixelTypeface(Typeface.BOLD)
+            minHeight = 52.dp()
+            background = framedButtonBackground(surfaceColor(), accentColor(), 10.dp())
+            thumbTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(TENGEN_ACCENT_LIGHT, TENGEN_MUTED),
+            )
+            trackTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(TENGEN_ACCENT_SURFACE, TENGEN_DIALOG),
+            )
+            setPadding(12.dp(), 5.dp(), 12.dp(), 5.dp())
             setOnCheckedChangeListener { _, value -> changed(value) }
             contentDescription = label
         }
@@ -317,11 +317,11 @@ class MainActivity : ComponentActivity() {
     private fun iconButton(icon: Int, description: Int, action: () -> Unit): ImageButton {
         return ImageButton(this).apply {
             setImageResource(icon)
-            imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+            imageTintList = ColorStateList.valueOf(TENGEN_TEXT)
             background = framedButtonBackground(
                 fill = surfaceColor(),
                 border = accentColor(),
-                radius = 12.dp(),
+                radius = 10.dp(),
             )
             setPadding(11.dp(), 11.dp(), 11.dp(), 11.dp())
             minimumWidth = 48.dp()
@@ -344,13 +344,13 @@ class MainActivity : ComponentActivity() {
             isAllCaps = false
             minHeight = 48.dp()
             setPadding(16.dp(), 0, 16.dp(), 0)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            typeface = pixelTypeface(Typeface.BOLD)
             letterSpacing = 0.035f
-            cornerRadius = 10.dp()
-            strokeWidth = 1.dp()
-            strokeColor = ColorStateList.valueOf(accentColor())
-            backgroundTintList = ColorStateList.valueOf(
-                if (emphasized) accentSurfaceColor() else surfaceColor(),
+            backgroundTintList = null
+            background = framedButtonBackground(
+                fill = if (emphasized) accentSurfaceColor() else surfaceColor(),
+                border = accentColor(),
+                radius = 10.dp(),
             )
             setTextColor(if (emphasized) textOnAccentColor() else dialogTextColor())
             setRippleColor(ColorStateList.valueOf(colorWithAlpha(accentColor(), 70)))
@@ -369,7 +369,7 @@ class MainActivity : ComponentActivity() {
                 GameStatus.RUNNING -> R.drawable.ic_pause
             },
         ))
-        pauseButton.imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+        pauseButton.imageTintList = ColorStateList.valueOf(TENGEN_TEXT)
         pauseButton.contentDescription = getString(
             when (status) {
                 GameStatus.PAUSED -> R.string.resume
@@ -382,42 +382,32 @@ class MainActivity : ComponentActivity() {
 
     private fun updateActionIconTint() {
         if (::settingsButton.isInitialized) {
-            settingsButton.imageTintList = ColorStateList.valueOf(GameSurfaceView.iconColor(settings.theme))
+            settingsButton.imageTintList = ColorStateList.valueOf(TENGEN_TEXT)
             settingsButton.background = framedButtonBackground(
                 fill = surfaceColor(),
                 border = accentColor(),
-                radius = 12.dp(),
+                radius = 10.dp(),
             )
         }
         if (::pauseButton.isInitialized) {
             pauseButton.background = framedButtonBackground(
                 fill = surfaceColor(),
                 border = accentColor(),
-                radius = 12.dp(),
+                radius = 10.dp(),
             )
         }
     }
 
     private fun updateChromeColors() {
         if (!::rootView.isInitialized) return
-        val background = GameSurfaceView.backgroundColor(settings.theme)
-        rootView.setBackgroundColor(background)
-        window.statusBarColor = background
-        window.navigationBarColor = background
+        rootView.setBackgroundColor(TENGEN_BACKGROUND)
+        window.statusBarColor = TENGEN_BACKGROUND
+        window.navigationBarColor = TENGEN_BACKGROUND
         WindowInsetsControllerCompat(window, rootView).apply {
-            val lightBars = settings.theme == ThemeOption.GAME_BOY
-            isAppearanceLightStatusBars = lightBars
-            isAppearanceLightNavigationBars = lightBars
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
         }
     }
-
-    private fun themeName(theme: ThemeOption): String = when (theme) {
-        ThemeOption.CLASSIC -> getString(R.string.classic_theme)
-        ThemeOption.TENGEN_BEVEL -> getString(R.string.tengen_theme)
-        ThemeOption.GAME_BOY -> getString(R.string.gameboy_theme)
-    }
-
-    private fun themeLabel(): String = getString(R.string.theme_value, getString(R.string.theme), themeName(settings.theme))
 
     private fun previewLabel(): String = getString(R.string.preview_count_value, getString(R.string.preview_count), settings.previewCount)
 
@@ -430,7 +420,7 @@ class MainActivity : ComponentActivity() {
             text = label
             setTextColor(accentColor())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            typeface = pixelTypeface(Typeface.BOLD)
             letterSpacing = 0.12f
             setPadding(4.dp(), 14.dp(), 4.dp(), 4.dp())
         }
@@ -438,11 +428,7 @@ class MainActivity : ComponentActivity() {
 
     private fun styleDialog(dialog: AlertDialog) {
         dialog.window?.let { window ->
-            window.setBackgroundDrawable(GradientDrawable().apply {
-                setColor(dialogSurfaceColor())
-                setStroke(1.dp(), accentColor())
-                cornerRadius = 18.dp().toFloat()
-            })
+            window.setBackgroundDrawable(framedButtonBackground(dialogSurfaceColor(), accentColor(), 18.dp()))
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             window.attributes = window.attributes.apply { dimAmount = 0.76f }
             window.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), WindowManager.LayoutParams.WRAP_CONTENT)
@@ -452,19 +438,19 @@ class MainActivity : ComponentActivity() {
             dialog.findViewById<TextView>(titleId)?.apply {
                 setTextColor(dialogTextColor())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                typeface = pixelTypeface(Typeface.BOLD)
             }
         }
         dialog.findViewById<TextView>(android.R.id.message)?.apply {
             setTextColor(dialogMutedColor())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = pixelTypeface(Typeface.NORMAL)
             setLineSpacing(2f, 1.05f)
         }
         listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
             dialog.getButton(which)?.let { button ->
                 button.setTextColor(accentColor())
-                button.typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                button.typeface = pixelTypeface(Typeface.BOLD)
                 button.isAllCaps = true
                 button.background = framedButtonBackground(
                     fill = surfaceColor(),
@@ -477,65 +463,172 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun framedButtonBackground(fill: Int, border: Int, radius: Int): StateListDrawable {
-        val drawable = StateListDrawable()
-        drawable.addState(
-            intArrayOf(android.R.attr.state_pressed),
-            GradientDrawable().apply {
-                setColor(colorWithAlpha(border, 46))
-                setStroke(1.dp(), border)
-                cornerRadius = radius.toFloat()
-            },
+    private fun framedButtonBackground(fill: Int, border: Int, radius: Int): Drawable = TengenBevelDrawable(
+        fill = fill,
+        border = border,
+        highlight = TENGEN_ACCENT_LIGHT,
+        shadow = TENGEN_ACCENT_DARK,
+        cut = radius.toFloat(),
+        borderWidth = 2.dp().toFloat(),
+    )
+
+    private fun accentColor(): Int = TENGEN_ACCENT
+
+    private fun accentSurfaceColor(): Int = TENGEN_ACCENT_SURFACE
+
+    private fun surfaceColor(): Int = TENGEN_PANEL
+
+    private fun dialogSurfaceColor(): Int = TENGEN_DIALOG
+
+    private fun dialogTextColor(): Int = TENGEN_TEXT
+
+    private fun dialogMutedColor(): Int = TENGEN_MUTED
+
+    private fun textOnAccentColor(): Int = TENGEN_INK
+
+    private fun pixelTypeface(style: Int): Typeface = if (style == Typeface.BOLD) {
+        TetrisTypography.bold(this)
+    } else {
+        TetrisTypography.regular(this)
+    }
+
+    private fun iconLayoutParams(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(48.dp(), 48.dp())
+
+    private companion object {
+        val TENGEN_BACKGROUND: Int = Color.rgb(6, 17, 38)
+        val TENGEN_PANEL: Int = Color.rgb(18, 38, 74)
+        val TENGEN_DIALOG: Int = Color.rgb(8, 18, 38)
+        val TENGEN_ACCENT: Int = Color.rgb(255, 206, 82)
+        val TENGEN_ACCENT_LIGHT: Int = Color.rgb(255, 236, 157)
+        val TENGEN_ACCENT_DARK: Int = Color.rgb(111, 67, 18)
+        val TENGEN_ACCENT_SURFACE: Int = Color.rgb(83, 61, 17)
+        val TENGEN_TEXT: Int = Color.rgb(255, 245, 204)
+        val TENGEN_MUTED: Int = Color.rgb(177, 190, 220)
+        val TENGEN_INK: Int = Color.rgb(10, 14, 22)
+    }
+
+    private class TengenBevelDrawable(
+        private val fill: Int,
+        private val border: Int,
+        private val highlight: Int,
+        private val shadow: Int,
+        private val cut: Float,
+        private val borderWidth: Float,
+    ) : Drawable() {
+        private val paint = Paint().apply {
+            isAntiAlias = false
+            style = Paint.Style.FILL
+        }
+        private var alpha = 255
+        private var colorFilter: ColorFilter? = null
+        private var pressed = false
+
+        override fun draw(canvas: Canvas) {
+            val bounds = bounds
+            if (bounds.width() <= 0 || bounds.height() <= 0) return
+
+            val left = bounds.left.toFloat()
+            val top = bounds.top.toFloat()
+            val right = bounds.right.toFloat()
+            val bottom = bounds.bottom.toFloat()
+            val bevel = cut.coerceAtMost(minOf(right - left, bottom - top) / 3f)
+            val inset = borderWidth.coerceAtMost(bevel / 2f).coerceAtLeast(1f)
+            val outer = chamferedPath(left, top, right, bottom, bevel)
+            val inner = chamferedPath(
+                left + inset,
+                top + inset,
+                right - inset,
+                bottom - inset,
+                (bevel - inset).coerceAtLeast(1f),
+            )
+
+            paint.alpha = alpha
+            paint.colorFilter = colorFilter
+            paint.style = Paint.Style.FILL
+            paint.color = border
+            canvas.drawPath(outer, paint)
+            paint.color = if (pressed) shade(fill, 0.78f) else fill
+            canvas.drawPath(inner, paint)
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = inset
+            paint.strokeJoin = Paint.Join.MITER
+            paint.color = if (pressed) shadow else highlight
+            canvas.drawPath(edgePath(left, top, right, bottom, bevel, topLeft = true), paint)
+            paint.color = if (pressed) highlight else shadow
+            canvas.drawPath(edgePath(left, top, right, bottom, bevel, topLeft = false), paint)
+            paint.style = Paint.Style.FILL
+        }
+
+        override fun isStateful(): Boolean = true
+
+        override fun onStateChange(stateSet: IntArray): Boolean {
+            val newPressed = stateSet.contains(android.R.attr.state_pressed)
+            if (newPressed == pressed) return false
+            pressed = newPressed
+            invalidateSelf()
+            return true
+        }
+
+        override fun setAlpha(alpha: Int) {
+            this.alpha = alpha.coerceIn(0, 255)
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            this.colorFilter = colorFilter
+            invalidateSelf()
+        }
+
+        override fun getOpacity(): Int = PixelFormat.OPAQUE
+
+        override fun getPadding(padding: Rect): Boolean {
+            padding.set(0, 0, 0, 0)
+            return false
+        }
+
+        private fun chamferedPath(left: Float, top: Float, right: Float, bottom: Float, bevel: Float): Path = Path().apply {
+            moveTo(left + bevel, top)
+            lineTo(right - bevel, top)
+            lineTo(right, top + bevel)
+            lineTo(right, bottom - bevel)
+            lineTo(right - bevel, bottom)
+            lineTo(left + bevel, bottom)
+            lineTo(left, bottom - bevel)
+            lineTo(left, top + bevel)
+            close()
+        }
+
+        private fun edgePath(
+            left: Float,
+            top: Float,
+            right: Float,
+            bottom: Float,
+            bevel: Float,
+            topLeft: Boolean,
+        ): Path = Path().apply {
+            if (topLeft) {
+                moveTo(left + bevel, top)
+                lineTo(right - bevel, top)
+                lineTo(right, top + bevel)
+                moveTo(left, top + bevel)
+                lineTo(left, bottom - bevel)
+                lineTo(left + bevel, bottom)
+            } else {
+                moveTo(right, top + bevel)
+                lineTo(right, bottom - bevel)
+                lineTo(right - bevel, bottom)
+                moveTo(right - bevel, bottom)
+                lineTo(left + bevel, bottom)
+                lineTo(left, bottom - bevel)
+            }
+        }
+
+        private fun shade(color: Int, factor: Float): Int = Color.rgb(
+            (Color.red(color) * factor).toInt().coerceIn(0, 255),
+            (Color.green(color) * factor).toInt().coerceIn(0, 255),
+            (Color.blue(color) * factor).toInt().coerceIn(0, 255),
         )
-        drawable.addState(
-            intArrayOf(),
-            GradientDrawable().apply {
-                setColor(fill)
-                setStroke(1.dp(), colorWithAlpha(border, 170))
-                cornerRadius = radius.toFloat()
-            },
-        )
-        return drawable
-    }
-
-    private fun accentColor(): Int = when (settings.theme) {
-        ThemeOption.CLASSIC -> Color.rgb(112, 190, 255)
-        ThemeOption.TENGEN_BEVEL -> Color.rgb(255, 206, 82)
-        ThemeOption.GAME_BOY -> Color.rgb(15, 56, 15)
-    }
-
-    private fun accentSurfaceColor(): Int = when (settings.theme) {
-        ThemeOption.CLASSIC -> Color.rgb(31, 63, 93)
-        ThemeOption.TENGEN_BEVEL -> Color.rgb(83, 61, 17)
-        ThemeOption.GAME_BOY -> Color.rgb(139, 172, 15)
-    }
-
-    private fun surfaceColor(): Int = when (settings.theme) {
-        ThemeOption.CLASSIC -> Color.rgb(27, 32, 48)
-        ThemeOption.TENGEN_BEVEL -> Color.rgb(18, 38, 74)
-        ThemeOption.GAME_BOY -> Color.rgb(139, 172, 15)
-    }
-
-    private fun dialogSurfaceColor(): Int = when (settings.theme) {
-        ThemeOption.CLASSIC -> Color.rgb(14, 18, 28)
-        ThemeOption.TENGEN_BEVEL -> Color.rgb(8, 18, 38)
-        ThemeOption.GAME_BOY -> Color.rgb(155, 188, 15)
-    }
-
-    private fun dialogTextColor(): Int = when (settings.theme) {
-        ThemeOption.GAME_BOY -> Color.rgb(15, 56, 15)
-        else -> Color.WHITE
-    }
-
-    private fun dialogMutedColor(): Int = when (settings.theme) {
-        ThemeOption.CLASSIC -> Color.rgb(173, 182, 204)
-        ThemeOption.TENGEN_BEVEL -> Color.rgb(177, 190, 220)
-        ThemeOption.GAME_BOY -> Color.rgb(48, 98, 48)
-    }
-
-    private fun textOnAccentColor(): Int = when (settings.theme) {
-        ThemeOption.GAME_BOY -> Color.rgb(155, 188, 15)
-        else -> Color.rgb(10, 14, 22)
     }
 
     private fun colorWithAlpha(color: Int, alpha: Int): Int = Color.argb(

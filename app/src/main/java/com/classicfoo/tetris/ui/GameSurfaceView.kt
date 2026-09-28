@@ -23,7 +23,6 @@ import com.classicfoo.tetris.engine.PieceDefinitions
 import com.classicfoo.tetris.engine.Rotation
 import com.classicfoo.tetris.engine.Tetromino
 import com.classicfoo.tetris.settings.GameSettings
-import com.classicfoo.tetris.settings.ThemeOption
 import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
@@ -37,9 +36,9 @@ class GameSurfaceView @JvmOverloads constructor(
     private val feedback: Feedback? = null,
 ) : View(context, attrs) {
     companion object {
-        fun iconColor(theme: ThemeOption): Int = Palette.forTheme(theme).text
+        fun iconColor(): Int = TengenStyle.text
 
-        fun backgroundColor(theme: ThemeOption): Int = Palette.forTheme(theme).background
+        fun backgroundColor(): Int = TengenStyle.background
     }
 
     private val blockPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -55,7 +54,7 @@ class GameSurfaceView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = android.graphics.Typeface.create("sans", android.graphics.Typeface.BOLD)
+        typeface = TetrisTypography.bold(context)
         isSubpixelText = true
     }
     private var settings = initialSettings
@@ -139,7 +138,7 @@ class GameSurfaceView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val state = engine.state
-        val palette = Palette.forTheme(settings.theme)
+        val palette = Palette.tengen()
         val layout = calculateLayout()
         val now = SystemClock.uptimeMillis()
         val clearFlash = clearFlashController.observe(state, now)
@@ -189,7 +188,10 @@ class GameSurfaceView @JvmOverloads constructor(
         val margin = dp(12f)
         val headerTop = dp(8f)
         val headerBottom = dp(54f)
-        val actionReserve = dp(112f)
+        // The activity overlays two 48dp controls with an 8dp gap and a
+        // 12dp trailing inset. Keep a little extra breathing room so the
+        // stats frame can never slide underneath the controls.
+        val actionReserve = dp(128f)
         val statsRight = (width - actionReserve)
             .coerceAtLeast(margin + dp(120f))
             .coerceAtMost(width - margin)
@@ -272,19 +274,18 @@ class GameSurfaceView @JvmOverloads constructor(
             baseline + textPaint.descent() + verticalPadding,
         )
 
-        blockPaint.style = Paint.Style.FILL
-        blockPaint.color = palette.overlay
-        blockPaint.alpha = 232
-        canvas.drawRoundRect(box, dp(10f), dp(10f), blockPaint)
-        blockPaint.style = Paint.Style.STROKE
-        blockPaint.strokeWidth = max(1f, dp(1f))
-        blockPaint.color = palette.accent
-        blockPaint.alpha = 220
-        canvas.drawRoundRect(box, dp(10f), dp(10f), blockPaint)
-        blockPaint.style = Paint.Style.FILL
+        drawBeveledPanel(
+            canvas = canvas,
+            palette = palette,
+            left = box.left,
+            top = box.top,
+            right = box.right,
+            bottom = box.bottom,
+            cutCorner = dp(7f),
+            fillColor = palette.overlay,
+        )
         textPaint.color = palette.accent
         canvas.drawText(label, centerX, baseline, textPaint)
-        blockPaint.alpha = 255
     }
 
     private fun drawStat(
@@ -328,10 +329,16 @@ class GameSurfaceView @JvmOverloads constructor(
             snap(layout.boardBottom + dp(4f)),
         )
         if (palette.pixelStyle) {
-            pixelPaint.style = Paint.Style.FILL
-            pixelPaint.alpha = 255
-            pixelPaint.color = palette.pixelOutline
-            canvas.drawRect(outer, pixelPaint)
+            drawBeveledPanel(
+                canvas = canvas,
+                palette = palette,
+                left = outer.left,
+                top = outer.top,
+                right = outer.right,
+                bottom = outer.bottom,
+                cutCorner = dp(5f),
+                fillColor = palette.board,
+            )
             pixelPaint.color = palette.board
             canvas.drawRect(
                 snap(layout.boardLeft),
@@ -738,13 +745,6 @@ class GameSurfaceView @JvmOverloads constructor(
         blockPaint.alpha = 255
     }
 
-    private fun drawPanel(canvas: Canvas, color: Int, left: Float, top: Float, right: Float, bottom: Float, radius: Float) {
-        blockPaint.style = Paint.Style.FILL
-        blockPaint.color = color
-        blockPaint.alpha = 255
-        canvas.drawRoundRect(RectF(left, top, right, bottom), radius, radius, blockPaint)
-    }
-
     private fun drawFramedPanel(
         canvas: Canvas,
         palette: Palette,
@@ -753,33 +753,74 @@ class GameSurfaceView @JvmOverloads constructor(
         right: Float,
         bottom: Float,
         radius: Float,
+        fillColor: Int = palette.panel,
     ) {
-        drawPanel(canvas, palette.panel, left, top, right, bottom, radius)
-        blockPaint.style = Paint.Style.STROKE
-        blockPaint.strokeWidth = max(dp(1f), if (palette.pixelStyle) dp(1.5f) else dp(1f))
-        blockPaint.color = palette.accent
-        blockPaint.alpha = if (palette.pixelStyle) 210 else 130
-        val inset = blockPaint.strokeWidth / 2f
-        canvas.drawRoundRect(
-            RectF(left + inset, top + inset, right - inset, bottom - inset),
-            radius,
-            radius,
-            blockPaint,
+        drawBeveledPanel(canvas, palette, left, top, right, bottom, radius, fillColor)
+    }
+
+    private fun drawBeveledPanel(
+        canvas: Canvas,
+        palette: Palette,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        cutCorner: Float,
+        fillColor: Int,
+    ) {
+        val outer = RectF(left, top, right, bottom)
+        val cut = cutCorner.coerceAtMost(min(outer.width(), outer.height()) / 3f)
+        val frameInset = dp(1f)
+        val innerInset = dp(4f).coerceAtMost(min(outer.width(), outer.height()) / 5f)
+
+        pixelPaint.style = Paint.Style.FILL
+        pixelPaint.alpha = 255
+        pixelPaint.color = palette.pixelOutline
+        canvas.drawPath(chamferedPath(outer, cut), pixelPaint)
+
+        pixelPaint.color = palette.accent
+        canvas.drawPath(
+            chamferedPath(
+                RectF(outer).apply { inset(frameInset, frameInset) },
+                (cut - frameInset).coerceAtLeast(0f),
+            ),
+            pixelPaint,
         )
-        if (palette.pixelStyle) {
-            blockPaint.strokeWidth = max(dp(0.5f), dp(1f))
-            blockPaint.color = Color.WHITE
-            blockPaint.alpha = 24
-            val innerInset = dp(3f)
-            canvas.drawRoundRect(
-                RectF(left + innerInset, top + innerInset, right - innerInset, bottom - innerInset),
-                max(0f, radius - dp(2f)),
-                max(0f, radius - dp(2f)),
-                blockPaint,
-            )
-        }
+
+        pixelPaint.color = fillColor
+        canvas.drawPath(
+            chamferedPath(
+                RectF(outer).apply { inset(innerInset, innerInset) },
+                (cut - innerInset).coerceAtLeast(0f),
+            ),
+            pixelPaint,
+        )
+
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = max(dp(1f), dp(1.25f))
+        blockPaint.strokeCap = Paint.Cap.SQUARE
+        blockPaint.color = TengenStyle.frameHighlight
+        blockPaint.alpha = 235
+        canvas.drawLine(left + cut, top + blockPaint.strokeWidth / 2f, right - cut, top + blockPaint.strokeWidth / 2f, blockPaint)
+        canvas.drawLine(left + blockPaint.strokeWidth / 2f, top + cut, left + blockPaint.strokeWidth / 2f, bottom - cut, blockPaint)
+        blockPaint.color = TengenStyle.frameShadow
+        blockPaint.alpha = 255
+        canvas.drawLine(left + cut, bottom - blockPaint.strokeWidth / 2f, right - cut, bottom - blockPaint.strokeWidth / 2f, blockPaint)
+        canvas.drawLine(right - blockPaint.strokeWidth / 2f, top + cut, right - blockPaint.strokeWidth / 2f, bottom - cut, blockPaint)
         blockPaint.style = Paint.Style.FILL
         blockPaint.alpha = 255
+    }
+
+    private fun chamferedPath(rect: RectF, cut: Float): Path = Path().apply {
+        moveTo(rect.left + cut, rect.top)
+        lineTo(rect.right - cut, rect.top)
+        lineTo(rect.right, rect.top + cut)
+        lineTo(rect.right, rect.bottom - cut)
+        lineTo(rect.right - cut, rect.bottom)
+        lineTo(rect.left + cut, rect.bottom)
+        lineTo(rect.left, rect.bottom - cut)
+        lineTo(rect.left, rect.top + cut)
+        close()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -899,92 +940,33 @@ class GameSurfaceView @JvmOverloads constructor(
         val overlay: Int,
         val ghostColor: Int,
         val ghostAlpha: Int,
-        val bevel: Boolean,
-        val isGameBoy: Boolean,
         val colors: Map<Tetromino, OpaqueColorRamp>,
     ) {
-        val pixelStyle: Boolean get() = bevel || isGameBoy
+        val bevel: Boolean get() = true
+        val pixelStyle: Boolean get() = true
 
         fun ramp(type: Tetromino): OpaqueColorRamp = colors.getValue(type)
 
         fun color(type: Tetromino): Int = ramp(type).base
 
         companion object {
-            fun forTheme(theme: ThemeOption): Palette = when (theme) {
-                ThemeOption.CLASSIC -> Palette(
-                    background = Color.rgb(12, 15, 23),
-                    panel = Color.rgb(27, 32, 48),
-                    board = Color.rgb(19, 23, 34),
-                    boardFrame = Color.rgb(27, 32, 48),
-                    pixelOutline = Color.rgb(12, 15, 23),
-                    grid = Color.rgb(72, 82, 108),
-                    gridAlpha = 175,
-                    text = Color.WHITE,
-                    mutedText = Color.rgb(173, 182, 204),
-                    accent = Color.rgb(112, 190, 255),
-                    flash = Color.WHITE,
-                    overlay = Color.rgb(5, 7, 12),
-                    ghostColor = Color.WHITE,
-                    ghostAlpha = 72,
-                    bevel = false,
-                    isGameBoy = false,
-                    colors = mapOf(
-                        Tetromino.I to OpaqueColorRamp(Color.rgb(0, 188, 212), Color.WHITE, Color.BLACK),
-                        Tetromino.O to OpaqueColorRamp(Color.rgb(255, 202, 40), Color.WHITE, Color.BLACK),
-                        Tetromino.T to OpaqueColorRamp(Color.rgb(171, 71, 188), Color.WHITE, Color.BLACK),
-                        Tetromino.J to OpaqueColorRamp(Color.rgb(63, 81, 181), Color.WHITE, Color.BLACK),
-                        Tetromino.L to OpaqueColorRamp(Color.rgb(255, 112, 67), Color.WHITE, Color.BLACK),
-                        Tetromino.S to OpaqueColorRamp(Color.rgb(76, 175, 80), Color.WHITE, Color.BLACK),
-                        Tetromino.Z to OpaqueColorRamp(Color.rgb(239, 83, 80), Color.WHITE, Color.BLACK),
-                    ),
-                )
-                ThemeOption.TENGEN_BEVEL -> Palette(
-                    background = Color.rgb(6, 17, 38),
-                    panel = Color.rgb(18, 38, 74),
-                    board = Color.rgb(11, 23, 49),
-                    boardFrame = Color.rgb(39, 79, 150),
-                    pixelOutline = Color.rgb(5, 10, 23),
-                    grid = Color.rgb(37, 65, 111),
-                    gridAlpha = 64,
-                    text = Color.rgb(255, 245, 204),
-                    mutedText = Color.rgb(177, 190, 220),
-                    accent = Color.rgb(255, 206, 82),
-                    flash = Color.rgb(255, 240, 158),
-                    overlay = Color.rgb(4, 8, 19),
-                    ghostColor = Color.rgb(255, 245, 204),
-                    ghostAlpha = 128,
-                    bevel = true,
-                    isGameBoy = false,
-                    colors = TengenBevelPalette.ramps,
-                )
-                ThemeOption.GAME_BOY -> Palette(
-                    background = Color.rgb(155, 188, 15),
-                    panel = Color.rgb(139, 172, 15),
-                    board = Color.rgb(35, 75, 35),
-                    boardFrame = Color.rgb(15, 56, 15),
-                    pixelOutline = Color.rgb(15, 56, 15),
-                    grid = Color.rgb(87, 126, 51),
-                    gridAlpha = 85,
-                    text = Color.rgb(15, 56, 15),
-                    mutedText = Color.rgb(48, 98, 48),
-                    accent = Color.rgb(15, 56, 15),
-                    flash = Color.rgb(155, 188, 15),
-                    overlay = Color.rgb(155, 188, 15),
-                    ghostColor = Color.rgb(155, 188, 15),
-                    ghostAlpha = 170,
-                    bevel = false,
-                    isGameBoy = true,
-                    colors = mapOf(
-                        Tetromino.I to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
-                        Tetromino.O to OpaqueColorRamp(Color.rgb(155, 188, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
-                        Tetromino.T to OpaqueColorRamp(Color.rgb(87, 126, 51), Color.rgb(155, 188, 15), Color.rgb(15, 56, 15)),
-                        Tetromino.J to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
-                        Tetromino.L to OpaqueColorRamp(Color.rgb(139, 172, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
-                        Tetromino.S to OpaqueColorRamp(Color.rgb(87, 126, 51), Color.rgb(155, 188, 15), Color.rgb(15, 56, 15)),
-                        Tetromino.Z to OpaqueColorRamp(Color.rgb(15, 56, 15), Color.rgb(48, 98, 48), Color.rgb(15, 56, 15)),
-                    ),
-                )
-            }
+            fun tengen(): Palette = Palette(
+                background = TengenStyle.background,
+                panel = TengenStyle.panel,
+                board = TengenStyle.board,
+                boardFrame = TengenStyle.boardFrame,
+                pixelOutline = TengenStyle.pixelOutline,
+                grid = TengenStyle.grid,
+                gridAlpha = 64,
+                text = TengenStyle.text,
+                mutedText = TengenStyle.mutedText,
+                accent = TengenStyle.accent,
+                flash = TengenStyle.flash,
+                overlay = TengenStyle.overlay,
+                ghostColor = TengenStyle.text,
+                ghostAlpha = 128,
+                colors = TengenBevelPalette.ramps,
+            )
         }
     }
 }
