@@ -193,11 +193,28 @@ class GameSurfaceView @JvmOverloads constructor(
         val statsRight = (width - actionReserve)
             .coerceAtLeast(margin + dp(120f))
             .coerceAtMost(width - margin)
-        drawPanel(canvas, palette.panel, margin, headerTop, statsRight, headerBottom, dp(12f))
+        drawFramedPanel(canvas, palette, margin, headerTop, statsRight, headerBottom, dp(12f))
 
         val columnWidth = (statsRight - margin) / 3f
+        gridPaint.color = palette.accent
+        gridPaint.alpha = if (palette.pixelStyle) 100 else 58
+        gridPaint.strokeWidth = max(dp(0.5f), dp(1f))
+        for (column in 1..2) {
+            val dividerX = margin + columnWidth * column
+            canvas.drawLine(dividerX, headerTop + dp(10f), dividerX, headerBottom - dp(10f), gridPaint)
+        }
+        gridPaint.alpha = 255
         drawStat(canvas, "SCORE", state.score.toString(), margin + columnWidth * 0.5f, headerTop, headerBottom, palette)
-        drawStat(canvas, "LEVEL", state.level.toString(), margin + columnWidth * 1.5f, headerTop, headerBottom, palette)
+        drawStat(
+            canvas,
+            "LEVEL",
+            state.level.toString(),
+            margin + columnWidth * 1.5f,
+            headerTop,
+            headerBottom,
+            palette,
+            valueColor = LevelLockedPalette.ramp(state.level).highlight,
+        )
         drawStat(canvas, "LINES", state.lines.toString(), margin + columnWidth * 2.5f, headerTop, headerBottom, palette)
 
         val cardTop = dp(64f)
@@ -206,8 +223,8 @@ class GameSurfaceView @JvmOverloads constructor(
         val cardGap = dp(8f)
         val nextLeft = margin + cardWidth + cardGap
         val nextRight = width - margin
-        drawPanel(canvas, palette.panel, margin, cardTop, margin + cardWidth, cardBottom, dp(12f))
-        drawPanel(canvas, palette.panel, nextLeft, cardTop, nextRight, cardBottom, dp(12f))
+        drawFramedPanel(canvas, palette, margin, cardTop, margin + cardWidth, cardBottom, dp(12f))
+        drawFramedPanel(canvas, palette, nextLeft, cardTop, nextRight, cardBottom, dp(12f))
         drawCardLabel(canvas, "HOLD", margin + cardWidth / 2f, cardTop + dp(17f), palette)
         drawCardLabel(canvas, "NEXT", (nextLeft + nextRight) / 2f, cardTop + dp(17f), palette)
 
@@ -270,12 +287,21 @@ class GameSurfaceView @JvmOverloads constructor(
         blockPaint.alpha = 255
     }
 
-    private fun drawStat(canvas: Canvas, label: String, value: String, centerX: Float, top: Float, bottom: Float, palette: Palette) {
+    private fun drawStat(
+        canvas: Canvas,
+        label: String,
+        value: String,
+        centerX: Float,
+        top: Float,
+        bottom: Float,
+        palette: Palette,
+        valueColor: Int = palette.text,
+    ) {
         textPaint.textAlign = Paint.Align.CENTER
         textPaint.color = palette.mutedText
         textPaint.textSize = canvasSp(9f, 11f)
         canvas.drawText(label, centerX, top + dp(16f), textPaint)
-        textPaint.color = palette.text
+        textPaint.color = valueColor
         textPaint.textSize = canvasSp(15f, 17f)
         canvas.drawText(value, centerX, bottom - dp(9f), textPaint)
     }
@@ -294,6 +320,7 @@ class GameSurfaceView @JvmOverloads constructor(
         layout: BoardLayout,
         clearFlash: ClearFlashFrame,
     ) {
+        val lockedRamp = LevelLockedPalette.ramp(state.level)
         val outer = RectF(
             snap(layout.boardLeft - dp(4f)),
             snap(layout.boardTop - dp(4f)),
@@ -317,6 +344,13 @@ class GameSurfaceView @JvmOverloads constructor(
             blockPaint.style = Paint.Style.FILL
             blockPaint.color = palette.board
             canvas.drawRoundRect(outer, dp(8f), dp(8f), blockPaint)
+            blockPaint.style = Paint.Style.STROKE
+            blockPaint.strokeWidth = max(dp(1f), dp(1.5f))
+            blockPaint.color = palette.accent
+            blockPaint.alpha = 92
+            canvas.drawRoundRect(outer, dp(8f), dp(8f), blockPaint)
+            blockPaint.style = Paint.Style.FILL
+            blockPaint.alpha = 255
         }
 
         if (settings.showGrid) {
@@ -337,11 +371,21 @@ class GameSurfaceView @JvmOverloads constructor(
         }
 
         if (palette.bevel) {
-            drawTengenBoard(canvas, state, palette, layout)
+            drawTengenBoard(canvas, state, palette, layout, lockedRamp)
         } else {
             state.board.forEachIndexed { y, row ->
                 row.forEachIndexed { x, type ->
-                    if (type != null) drawCell(canvas, type, layout.boardLeft + x * layout.cellSize, layout.boardTop + y * layout.cellSize, layout.cellSize, palette)
+                    if (type != null) {
+                        drawCell(
+                            canvas = canvas,
+                            type = type,
+                            x = layout.boardLeft + x * layout.cellSize,
+                            y = layout.boardTop + y * layout.cellSize,
+                            size = layout.cellSize,
+                            palette = palette,
+                            rampOverride = lockedRamp,
+                        )
+                    }
                 }
             }
         }
@@ -370,7 +414,13 @@ class GameSurfaceView @JvmOverloads constructor(
      * coordinate-specific fallback id instead of accidentally joining to its
      * neighbour.
      */
-    private fun drawTengenBoard(canvas: Canvas, state: GameState, palette: Palette, layout: BoardLayout) {
+    private fun drawTengenBoard(
+        canvas: Canvas,
+        state: GameState,
+        palette: Palette,
+        layout: BoardLayout,
+        lockedRamp: OpaqueColorRamp,
+    ) {
         val occupied = buildMap<PixelPoint, TengenBoardCell> {
             state.board.forEachIndexed { y, row ->
                 row.forEachIndexed { x, type ->
@@ -407,6 +457,7 @@ class GameSurfaceView @JvmOverloads constructor(
                 type = owner.type,
                 cells = group.map { cell -> pixelGridCell(cell.x, cell.y, layout.boardLeft, layout.boardTop, layout.cellSize) },
                 palette = palette,
+                rampOverride = lockedRamp,
             )
         }
     }
@@ -549,8 +600,9 @@ class GameSurfaceView @JvmOverloads constructor(
         type: Tetromino,
         cells: List<TengenGridCell>,
         palette: Palette,
+        rampOverride: OpaqueColorRamp? = null,
     ) {
-        val ramp = palette.ramp(type)
+        val ramp = rampOverride ?: palette.ramp(type)
         val parts = TengenBevelGeometry.fromCells(cells)
         pixelPaint.style = Paint.Style.FILL
         pixelPaint.alpha = 255
@@ -581,10 +633,12 @@ class GameSurfaceView @JvmOverloads constructor(
         size: Float,
         palette: Palette,
         ghost: Boolean = false,
+        rampOverride: OpaqueColorRamp? = null,
     ) {
-        val color = palette.color(type)
+        val ramp = rampOverride ?: palette.ramp(type)
+        val color = ramp.base
         if (palette.pixelStyle) {
-            drawPixelCell(canvas, palette, palette.ramp(type), x, y, size, ghost)
+            drawPixelCell(canvas, palette, ramp, x, y, size, ghost)
             return
         }
         val inset = max(dp(1f), size * 0.055f)
@@ -603,7 +657,7 @@ class GameSurfaceView @JvmOverloads constructor(
         blockPaint.style = Paint.Style.FILL
         val radius = size * 0.12f
         canvas.drawRoundRect(rect, radius, radius, blockPaint)
-        blockPaint.color = Color.WHITE
+        blockPaint.color = ramp.highlight
         blockPaint.alpha = 38
         canvas.drawRoundRect(
             RectF(rect.left + size * 0.16f, rect.top + size * 0.12f, rect.right - size * 0.2f, rect.top + size * 0.24f),
@@ -689,6 +743,43 @@ class GameSurfaceView @JvmOverloads constructor(
         blockPaint.color = color
         blockPaint.alpha = 255
         canvas.drawRoundRect(RectF(left, top, right, bottom), radius, radius, blockPaint)
+    }
+
+    private fun drawFramedPanel(
+        canvas: Canvas,
+        palette: Palette,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        radius: Float,
+    ) {
+        drawPanel(canvas, palette.panel, left, top, right, bottom, radius)
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = max(dp(1f), if (palette.pixelStyle) dp(1.5f) else dp(1f))
+        blockPaint.color = palette.accent
+        blockPaint.alpha = if (palette.pixelStyle) 210 else 130
+        val inset = blockPaint.strokeWidth / 2f
+        canvas.drawRoundRect(
+            RectF(left + inset, top + inset, right - inset, bottom - inset),
+            radius,
+            radius,
+            blockPaint,
+        )
+        if (palette.pixelStyle) {
+            blockPaint.strokeWidth = max(dp(0.5f), dp(1f))
+            blockPaint.color = Color.WHITE
+            blockPaint.alpha = 24
+            val innerInset = dp(3f)
+            canvas.drawRoundRect(
+                RectF(left + innerInset, top + innerInset, right - innerInset, bottom - innerInset),
+                max(0f, radius - dp(2f)),
+                max(0f, radius - dp(2f)),
+                blockPaint,
+            )
+        }
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.alpha = 255
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
