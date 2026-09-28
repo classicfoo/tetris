@@ -62,6 +62,7 @@ class GameEngineClearStagingTest {
 
         assertFalse(completed.isClearing)
         assertEquals(GameStatus.RUNNING, completed.status)
+        assertEquals(0, completed.level)
         assertEquals(1, completed.lines)
         assertEquals(100L, completed.lastScoreDelta)
         assertEquals(100L, completed.score)

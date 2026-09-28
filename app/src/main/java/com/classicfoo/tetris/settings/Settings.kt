@@ -21,6 +21,12 @@ data class ScoreEntry(
     val level: Int,
 )
 
+internal const val CURRENT_LEVEL_BASE = 0
+internal const val LEGACY_LEVEL_BASE = 1
+
+internal fun migrateScoreLevel(level: Int, storedLevelBase: Int): Int =
+    (level + CURRENT_LEVEL_BASE - storedLevelBase).coerceAtLeast(CURRENT_LEVEL_BASE)
+
 class SettingsStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
@@ -78,7 +84,8 @@ class ScoreStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun load(): List<ScoreEntry> {
-        return preferences.getString(KEY_SCORES, "")
+        val storedLevelBase = preferences.getInt(KEY_LEVEL_BASE, LEGACY_LEVEL_BASE)
+        val entries = preferences.getString(KEY_SCORES, "")
             .orEmpty()
             .split(';')
             .filter { it.isNotBlank() }
@@ -89,22 +96,35 @@ class ScoreStore(context: Context) {
                     ScoreEntry(values[0].toLong(), values[1].toInt(), values[2].toInt())
                 }.getOrNull()
             }
+            .map { entry ->
+                entry.copy(level = migrateScoreLevel(entry.level, storedLevelBase))
+            }
             .sortedWith(compareByDescending<ScoreEntry> { it.score }.thenByDescending { it.lines })
             .take(MAX_SCORES)
+        if (storedLevelBase != CURRENT_LEVEL_BASE) persist(entries)
+        return entries
     }
 
     fun record(entry: ScoreEntry): List<ScoreEntry> {
         val updated = (load() + entry)
             .sortedWith(compareByDescending<ScoreEntry> { it.score }.thenByDescending { it.lines })
             .take(MAX_SCORES)
-        val encoded = updated.joinToString(";") { "${it.score},${it.lines},${it.level}" }
-        preferences.edit { putString(KEY_SCORES, encoded) }
+        persist(updated)
         return updated
+    }
+
+    private fun persist(entries: List<ScoreEntry>) {
+        val encoded = entries.joinToString(";") { "${it.score},${it.lines},${it.level}" }
+        preferences.edit {
+            putString(KEY_SCORES, encoded)
+            putInt(KEY_LEVEL_BASE, CURRENT_LEVEL_BASE)
+        }
     }
 
     private companion object {
         const val PREFERENCES = "tetris_scores"
         const val KEY_SCORES = "scores"
+        const val KEY_LEVEL_BASE = "level_base"
         const val MAX_SCORES = 10
     }
 }

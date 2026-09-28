@@ -53,7 +53,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             holdUsed = false,
             score = 0,
             lines = 0,
-            level = 1,
+            level = 0,
             combo = -1,
             backToBack = false,
             status = GameStatus.RUNNING,
@@ -277,7 +277,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
             holdUsed = false,
             score = state.score + delta,
             lines = state.lines + linesCleared,
-            level = (state.lines + linesCleared) / 10 + 1,
+            level = (state.lines + linesCleared) / 10,
             combo = combo,
             backToBack = backToBack,
             status = if (gameOver) GameStatus.GAME_OVER else GameStatus.RUNNING,
@@ -346,7 +346,7 @@ class GameEngine(seed: Long = System.nanoTime()) {
     }
 
     private fun gravityDelayMs(level: Int): Long {
-        val seconds = (0.8 - 0.007 * (level - 1)).pow(level - 1)
+        val seconds = (0.8 - 0.007 * level).pow(level)
         return max(50L, (seconds * 1_000).toLong())
     }
 
@@ -388,6 +388,9 @@ internal object Scoring {
         backToBackBefore: Boolean,
         perfectClear: Boolean,
     ): Long {
+        // The display starts at level 0, but scoring still needs the usual
+        // first-level multiplier of one.
+        val scoreMultiplier = (level + 1).coerceAtLeast(1)
         val base = when (tSpin) {
             TSpinKind.FULL -> when (lines) {
                 0 -> 400
@@ -406,16 +409,16 @@ internal object Scoring {
                 4 -> 800
                 else -> 0
             }
-        }.toLong() * level
+        }.toLong() * scoreMultiplier
 
         val difficult = (tSpin != TSpinKind.NONE && lines > 0) || lines == 4
         val backToBackBonus = if (difficult && backToBackBefore) base / 2 else 0
         val comboBonus = if (lines > 0 && comboBefore >= 0) {
-            50L * (comboBefore + 1) * level
+            50L * (comboBefore + 1) * scoreMultiplier
         } else {
             0
         }
-        val perfectClearBonus = if (perfectClear) 3_500L * level else 0
+        val perfectClearBonus = if (perfectClear) 3_500L * scoreMultiplier else 0
         return base + backToBackBonus + comboBonus + perfectClearBonus
     }
 }

@@ -23,6 +23,7 @@ class GameEngineTest {
         assertEquals(PREVIEW_SIZE, state.next.size)
         assertEquals(BOARD_HEIGHT, state.board.size)
         assertTrue(state.board.all { row -> row.size == BOARD_WIDTH && row.all { it == null } })
+        assertEquals(0, state.level)
         assertEquals(GameStatus.RUNNING, state.status)
     }
 
@@ -91,8 +92,8 @@ class GameEngineTest {
 
     @Test
     fun `scoring includes combo back to back and perfect clear bonuses`() {
-        val first = Scoring.scoreDelta(4, 1, TSpinKind.NONE, -1, false, false)
-        val second = Scoring.scoreDelta(4, 1, TSpinKind.NONE, 0, true, true)
+        val first = Scoring.scoreDelta(4, 0, TSpinKind.NONE, -1, false, false)
+        val second = Scoring.scoreDelta(4, 0, TSpinKind.NONE, 0, true, true)
 
         assertEquals(800L, first)
         assertTrue(second > first)
@@ -100,8 +101,8 @@ class GameEngineTest {
 
     @Test
     fun `t spin scoring is distinct from a normal line clear`() {
-        val tSpin = Scoring.scoreDelta(1, 1, TSpinKind.FULL, -1, false, false)
-        val single = Scoring.scoreDelta(1, 1, TSpinKind.NONE, -1, false, false)
+        val tSpin = Scoring.scoreDelta(1, 0, TSpinKind.FULL, -1, false, false)
+        val single = Scoring.scoreDelta(1, 0, TSpinKind.NONE, -1, false, false)
 
         assertTrue(tSpin > single)
     }
