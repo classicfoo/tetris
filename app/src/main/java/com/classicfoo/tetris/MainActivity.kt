@@ -1,13 +1,7 @@
 package com.classicfoo.tetris
 
 import android.content.res.ColorStateList
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorFilter
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.os.Bundle
@@ -37,6 +31,7 @@ import com.classicfoo.tetris.settings.ScoreStore
 import com.classicfoo.tetris.settings.SettingsStore
 import com.classicfoo.tetris.ui.Feedback
 import com.classicfoo.tetris.ui.GameSurfaceView
+import com.classicfoo.tetris.ui.SpriteSheet
 import com.classicfoo.tetris.ui.TetrisTypography
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -53,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private var settings = GameSettings()
     private var gameOverShown = false
     private var menuDialog: AlertDialog? = null
+    private val spriteSheet by lazy(LazyThreadSafetyMode.NONE) { SpriteSheet.load(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -282,7 +278,7 @@ class MainActivity : ComponentActivity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = pixelTypeface(Typeface.BOLD)
             minHeight = 52.dp()
-            background = framedButtonBackground(surfaceColor(), accentColor(), 10.dp())
+            background = spritePanel(SpriteSheet.Regions.WIDE_PANEL)
             thumbTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                 intArrayOf(TENGEN_ACCENT_LIGHT, TENGEN_MUTED),
@@ -318,11 +314,7 @@ class MainActivity : ComponentActivity() {
         return ImageButton(this).apply {
             setImageResource(icon)
             imageTintList = ColorStateList.valueOf(TENGEN_TEXT)
-            background = framedButtonBackground(
-                fill = surfaceColor(),
-                border = accentColor(),
-                radius = 10.dp(),
-            )
+            background = spritePanel(SpriteSheet.Regions.SMALL_PANEL)
             setPadding(11.dp(), 11.dp(), 11.dp(), 11.dp())
             minimumWidth = 48.dp()
             minimumHeight = 48.dp()
@@ -347,12 +339,10 @@ class MainActivity : ComponentActivity() {
             typeface = pixelTypeface(Typeface.BOLD)
             letterSpacing = 0.035f
             backgroundTintList = null
-            background = framedButtonBackground(
-                fill = if (emphasized) accentSurfaceColor() else surfaceColor(),
-                border = accentColor(),
-                radius = 10.dp(),
+            background = spritePanel(
+                if (emphasized) SpriteSheet.Regions.RED_BUTTON else SpriteSheet.Regions.WIDE_PANEL,
             )
-            setTextColor(if (emphasized) textOnAccentColor() else dialogTextColor())
+            setTextColor(if (emphasized) accentColor() else dialogTextColor())
             setRippleColor(ColorStateList.valueOf(colorWithAlpha(accentColor(), 70)))
             elevation = 2.dp().toFloat()
             setOnClickListener { action() }
@@ -383,18 +373,10 @@ class MainActivity : ComponentActivity() {
     private fun updateActionIconTint() {
         if (::settingsButton.isInitialized) {
             settingsButton.imageTintList = ColorStateList.valueOf(TENGEN_TEXT)
-            settingsButton.background = framedButtonBackground(
-                fill = surfaceColor(),
-                border = accentColor(),
-                radius = 10.dp(),
-            )
+            settingsButton.background = spritePanel(SpriteSheet.Regions.SMALL_PANEL)
         }
         if (::pauseButton.isInitialized) {
-            pauseButton.background = framedButtonBackground(
-                fill = surfaceColor(),
-                border = accentColor(),
-                radius = 10.dp(),
-            )
+            pauseButton.background = spritePanel(SpriteSheet.Regions.SMALL_PANEL)
         }
     }
 
@@ -428,7 +410,7 @@ class MainActivity : ComponentActivity() {
 
     private fun styleDialog(dialog: AlertDialog) {
         dialog.window?.let { window ->
-            window.setBackgroundDrawable(framedButtonBackground(dialogSurfaceColor(), accentColor(), 18.dp()))
+            window.setBackgroundDrawable(spritePanel(SpriteSheet.Regions.LARGE_PANEL))
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             window.attributes = window.attributes.apply { dimAmount = 0.76f }
             window.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), WindowManager.LayoutParams.WRAP_CONTENT)
@@ -452,39 +434,20 @@ class MainActivity : ComponentActivity() {
                 button.setTextColor(accentColor())
                 button.typeface = pixelTypeface(Typeface.BOLD)
                 button.isAllCaps = true
-                button.background = framedButtonBackground(
-                    fill = surfaceColor(),
-                    border = accentColor(),
-                    radius = 10.dp(),
-                )
+                button.background = spritePanel(SpriteSheet.Regions.WIDE_PANEL)
                 button.setPadding(14.dp(), 0, 14.dp(), 0)
                 button.minHeight = 44.dp()
             }
         }
     }
 
-    private fun framedButtonBackground(fill: Int, border: Int, radius: Int): Drawable = TengenBevelDrawable(
-        fill = fill,
-        border = border,
-        highlight = TENGEN_ACCENT_LIGHT,
-        shadow = TENGEN_ACCENT_DARK,
-        cut = radius.toFloat(),
-        borderWidth = 2.dp().toFloat(),
-    )
+    private fun spritePanel(region: SpriteSheet.Region): Drawable = spriteSheet.panel(region)
 
     private fun accentColor(): Int = TENGEN_ACCENT
-
-    private fun accentSurfaceColor(): Int = TENGEN_ACCENT_SURFACE
-
-    private fun surfaceColor(): Int = TENGEN_PANEL
-
-    private fun dialogSurfaceColor(): Int = TENGEN_DIALOG
 
     private fun dialogTextColor(): Int = TENGEN_TEXT
 
     private fun dialogMutedColor(): Int = TENGEN_MUTED
-
-    private fun textOnAccentColor(): Int = TENGEN_INK
 
     private fun pixelTypeface(style: Int): Typeface = if (style == Typeface.BOLD) {
         TetrisTypography.bold(this)
@@ -496,139 +459,12 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         val TENGEN_BACKGROUND: Int = Color.rgb(6, 17, 38)
-        val TENGEN_PANEL: Int = Color.rgb(18, 38, 74)
         val TENGEN_DIALOG: Int = Color.rgb(8, 18, 38)
         val TENGEN_ACCENT: Int = Color.rgb(255, 206, 82)
         val TENGEN_ACCENT_LIGHT: Int = Color.rgb(255, 236, 157)
-        val TENGEN_ACCENT_DARK: Int = Color.rgb(111, 67, 18)
         val TENGEN_ACCENT_SURFACE: Int = Color.rgb(83, 61, 17)
         val TENGEN_TEXT: Int = Color.rgb(255, 245, 204)
         val TENGEN_MUTED: Int = Color.rgb(177, 190, 220)
-        val TENGEN_INK: Int = Color.rgb(10, 14, 22)
-    }
-
-    private class TengenBevelDrawable(
-        private val fill: Int,
-        private val border: Int,
-        private val highlight: Int,
-        private val shadow: Int,
-        private val cut: Float,
-        private val borderWidth: Float,
-    ) : Drawable() {
-        private val paint = Paint().apply {
-            isAntiAlias = false
-            style = Paint.Style.FILL
-        }
-        private var alpha = 255
-        private var colorFilter: ColorFilter? = null
-        private var pressed = false
-
-        override fun draw(canvas: Canvas) {
-            val bounds = bounds
-            if (bounds.width() <= 0 || bounds.height() <= 0) return
-
-            val left = bounds.left.toFloat()
-            val top = bounds.top.toFloat()
-            val right = bounds.right.toFloat()
-            val bottom = bounds.bottom.toFloat()
-            val bevel = cut.coerceAtMost(minOf(right - left, bottom - top) / 3f)
-            val inset = borderWidth.coerceAtMost(bevel / 2f).coerceAtLeast(1f)
-            val outer = chamferedPath(left, top, right, bottom, bevel)
-            val inner = chamferedPath(
-                left + inset,
-                top + inset,
-                right - inset,
-                bottom - inset,
-                (bevel - inset).coerceAtLeast(1f),
-            )
-
-            paint.alpha = alpha
-            paint.colorFilter = colorFilter
-            paint.style = Paint.Style.FILL
-            paint.color = border
-            canvas.drawPath(outer, paint)
-            paint.color = if (pressed) shade(fill, 0.78f) else fill
-            canvas.drawPath(inner, paint)
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = inset
-            paint.strokeJoin = Paint.Join.MITER
-            paint.color = if (pressed) shadow else highlight
-            canvas.drawPath(edgePath(left, top, right, bottom, bevel, topLeft = true), paint)
-            paint.color = if (pressed) highlight else shadow
-            canvas.drawPath(edgePath(left, top, right, bottom, bevel, topLeft = false), paint)
-            paint.style = Paint.Style.FILL
-        }
-
-        override fun isStateful(): Boolean = true
-
-        override fun onStateChange(stateSet: IntArray): Boolean {
-            val newPressed = stateSet.contains(android.R.attr.state_pressed)
-            if (newPressed == pressed) return false
-            pressed = newPressed
-            invalidateSelf()
-            return true
-        }
-
-        override fun setAlpha(alpha: Int) {
-            this.alpha = alpha.coerceIn(0, 255)
-            invalidateSelf()
-        }
-
-        override fun setColorFilter(colorFilter: ColorFilter?) {
-            this.colorFilter = colorFilter
-            invalidateSelf()
-        }
-
-        override fun getOpacity(): Int = PixelFormat.OPAQUE
-
-        override fun getPadding(padding: Rect): Boolean {
-            padding.set(0, 0, 0, 0)
-            return false
-        }
-
-        private fun chamferedPath(left: Float, top: Float, right: Float, bottom: Float, bevel: Float): Path = Path().apply {
-            moveTo(left + bevel, top)
-            lineTo(right - bevel, top)
-            lineTo(right, top + bevel)
-            lineTo(right, bottom - bevel)
-            lineTo(right - bevel, bottom)
-            lineTo(left + bevel, bottom)
-            lineTo(left, bottom - bevel)
-            lineTo(left, top + bevel)
-            close()
-        }
-
-        private fun edgePath(
-            left: Float,
-            top: Float,
-            right: Float,
-            bottom: Float,
-            bevel: Float,
-            topLeft: Boolean,
-        ): Path = Path().apply {
-            if (topLeft) {
-                moveTo(left + bevel, top)
-                lineTo(right - bevel, top)
-                lineTo(right, top + bevel)
-                moveTo(left, top + bevel)
-                lineTo(left, bottom - bevel)
-                lineTo(left + bevel, bottom)
-            } else {
-                moveTo(right, top + bevel)
-                lineTo(right, bottom - bevel)
-                lineTo(right - bevel, bottom)
-                moveTo(right - bevel, bottom)
-                lineTo(left + bevel, bottom)
-                lineTo(left, bottom - bevel)
-            }
-        }
-
-        private fun shade(color: Int, factor: Float): Int = Color.rgb(
-            (Color.red(color) * factor).toInt().coerceIn(0, 255),
-            (Color.green(color) * factor).toInt().coerceIn(0, 255),
-            (Color.blue(color) * factor).toInt().coerceIn(0, 255),
-        )
     }
 
     private fun colorWithAlpha(color: Int, alpha: Int): Int = Color.argb(
